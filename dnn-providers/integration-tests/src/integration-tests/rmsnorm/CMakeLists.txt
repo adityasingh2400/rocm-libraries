@@ -5,6 +5,8 @@ if(BUILD_CPP_GRAPH_TESTS)
     target_sources(${INTEGRATION_TESTS_EXE}
         PRIVATE
             IntegrationGpuRMSNorm.cpp
+            IntegrationGpuRMSNormActivation.cpp
             IntegrationGpuRMSNormBackward.cpp
+            IntegrationGpuRMSNormBackwardActivation.cpp
     )
 endif()
