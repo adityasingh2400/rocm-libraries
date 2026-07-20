@@ -105,6 +105,7 @@ void generate_kernel(EngineState* states,
 
     EngineState  state = states[state_id];
     unsigned int index = state_id;
+    generator.stage_to_lds(threadIdx.x, blockDim.x);
     __syncthreads();
     while(index < size)
     {
@@ -629,6 +630,12 @@ struct generator_type
     static void create() {}
 
     static void destroy() {}
+
+    // Default no-op staging hook. Discrete generators override this to copy
+    // their probability/alias tables into LDS for small distributions.
+ __device__
+    void stage_to_lds(unsigned int /*tid*/, unsigned int /*block_size*/)
+    {}
 };
 
 template<typename Engine>
@@ -759,6 +766,35 @@ struct generator_discrete_poisson : public generator_type
     {
         RAND_CHECK(rand_destroy_discrete_distribution(discrete_distribution));
     }
+    
+    __device__
+    void                         stage_to_lds(unsigned int tid, unsigned int block_size)
+    {
+        constexpr unsigned int LDS_DISTR_MAX = 128;
+        __shared__ rocrand_discrete_distribution_st s_dist;
+        __shared__ double s_probability[LDS_DISTR_MAX];
+        __shared__ unsigned int s_alias[LDS_DISTR_MAX];
+
+        const unsigned int dist_size = discrete_distribution->size;
+        if(dist_size > LDS_DISTR_MAX)
+            return; // outer __syncthreads() still fires
+
+        if(tid == 0)
+        {
+            s_dist.size        = dist_size;
+            s_dist.offset      = discrete_distribution->offset;
+            s_dist.probability = s_probability;
+            s_dist.alias       = s_alias;
+            s_dist.cdf         = nullptr;
+        }
+        for(unsigned int i = tid; i < dist_size; i += block_size)
+        {
+            s_probability[i] = discrete_distribution->probability[i];
+            s_alias[i]       = discrete_distribution->alias[i];
+        }
+        __syncthreads();
+        discrete_distribution = &s_dist;
+    }
 
     __device__
     data_type operator()(Engine* state) const
@@ -768,6 +804,7 @@ struct generator_discrete_poisson : public generator_type
 
     rand_discrete_distribution_t discrete_distribution;
     double                       lambda;
+
 };
 
 #ifdef __HIP__
@@ -795,6 +832,35 @@ struct generator_discrete_custom : public generator_type
     void destroy()
     {
         RAND_CHECK(rand_destroy_discrete_distribution(discrete_distribution));
+    }
+
+    __device__
+    void                         stage_to_lds(unsigned int tid, unsigned int block_size)
+    {
+        constexpr unsigned int LDS_DISTR_MAX = 128;
+        __shared__ rocrand_discrete_distribution_st s_dist;
+        __shared__ double s_probability[LDS_DISTR_MAX];
+        __shared__ unsigned int s_alias[LDS_DISTR_MAX];
+
+        const unsigned int dist_size = discrete_distribution->size;
+        if(dist_size > LDS_DISTR_MAX)
+            return; // outer __syncthreads() still fires
+
+        if(tid == 0)
+        {
+            s_dist.size        = dist_size;
+            s_dist.offset      = discrete_distribution->offset;
+            s_dist.probability = s_probability;
+            s_dist.alias       = s_alias;
+            s_dist.cdf         = nullptr;
+        }
+        for(unsigned int i = tid; i < dist_size; i += block_size)
+        {
+            s_probability[i] = discrete_distribution->probability[i];
+            s_alias[i]       = discrete_distribution->alias[i];
+        }
+        __syncthreads();
+        discrete_distribution = &s_dist;
     }
 
     __device__
