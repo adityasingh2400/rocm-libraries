@@ -83,6 +83,81 @@ public:
         output[0] = (*this)(input[0]);
     }
 
+    __device__
+    void stage_to_lds(unsigned int tid, unsigned int block_size)
+    {
+
+        constexpr unsigned int LDS_DISTR_MAX = 128;
+        __shared__ rocrand_discrete_distribution_st s_dist;
+
+        const unsigned int dist_size = m_distribution.size;
+        if(dist_size > LDS_DISTR_MAX)
+            return; // outer __syncthreads() still fires
+
+        if constexpr(Method == DISCRETE_METHOD_ALIAS)
+        {
+            __shared__ double s_probability[LDS_DISTR_MAX];
+            __shared__ unsigned int s_alias[LDS_DISTR_MAX];
+
+            if(tid == 0)
+            {
+                s_dist.size        = dist_size;
+                s_dist.offset      = m_distribution.offset;
+                s_dist.probability = s_probability;
+                s_dist.alias       = s_alias;
+                s_dist.cdf         = nullptr;
+            }
+            for(unsigned int i = tid; i < dist_size; i += block_size)
+            {
+
+                s_probability[i] = m_distribution.probability[i];
+                s_alias[i]       = m_distribution.alias[i];
+            }
+        }
+        else if constexpr(Method == DISCRETE_METHOD_CDF)
+        {
+            __shared__ double s_cdf[LDS_DISTR_MAX];
+
+            if(tid == 0)
+            {
+                s_dist.size        = dist_size;
+                s_dist.offset      = m_distribution.offset;
+                s_dist.probability = nullptr;
+                s_dist.alias       = nullptr;
+                s_dist.cdf         = s_cdf;
+            }
+            for(unsigned int i = tid; i < dist_size; i += block_size)
+            {
+                s_cdf[i] = m_distribution.cdf[i];
+            }
+        }
+        else
+        {
+            __shared__ double s_probability[LDS_DISTR_MAX];
+            __shared__ unsigned int s_alias[LDS_DISTR_MAX];
+            __shared__ double s_cdf[LDS_DISTR_MAX];
+
+            if(tid == 0)
+            {
+                s_dist.size        = dist_size;
+                s_dist.offset      = m_distribution.offset;
+                s_dist.probability = s_probability;
+                s_dist.alias       = s_alias;
+                s_dist.cdf         = s_cdf;
+            }
+            for(unsigned int i = tid; i < dist_size; i += block_size)
+            {
+
+                s_probability[i] = m_distribution.probability[i];
+                s_alias[i]       = m_distribution.alias[i];
+                s_cdf[i]         = m_distribution.cdf[i];
+            }
+        }
+
+        __syncthreads();
+        m_distribution = s_dist;
+    }
+
 private:
     rocrand_discrete_distribution_st m_distribution;
 };

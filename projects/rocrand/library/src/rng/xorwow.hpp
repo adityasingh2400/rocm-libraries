@@ -109,6 +109,16 @@ __host__ __device__ __forceinline__
 
         size_t index = thread_id;
 #ifdef __HIP_DEVICE_COMPILE__
+        if constexpr(std::is_base_of<
+                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_ALIAS>,
+                         Distribution>::value
+                     || std::is_base_of<
+                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_CDF>,
+                         Distribution>::value
+                     || std::is_base_of<
+                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_UNIVERSAL>,
+                         Distribution>::value)
+            distribution.stage_to_lds(threadIdx.x, blockDim.x);
         __syncthreads();
 #endif
 #if defined(__gfx942__) || defined(__gfx908__)

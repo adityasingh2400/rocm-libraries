@@ -74,6 +74,12 @@ public:
     {
         output[0] = (*this)(input[0]);
     }
+
+    __device__
+    void stage_to_lds(unsigned int tid, unsigned int block_size)
+    {
+        base_t::stage_to_lds(tid, block_size);
+    }
 };
 
 // Approximation of Poisson distribution with normal distribution when lambda is large

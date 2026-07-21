@@ -206,6 +206,16 @@ struct generate_sobol_host
                                                          scramble_constant,
                                                          offset + engine_offset);
 #ifdef __HIP_DEVICE_COMPILE__
+        if constexpr(std::is_base_of<
+                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_ALIAS>,
+                         Distribution>::value
+                     || std::is_base_of<
+                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_CDF>,
+                         Distribution>::value
+                     || std::is_base_of<
+                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_UNIVERSAL>,
+                         Distribution>::value)
+            distribution.stage_to_lds(threadIdx.x, blockDim.x);
         __syncthreads();
 #endif
         while(index < n)
@@ -242,6 +252,16 @@ struct generate_sobol_host
 
         vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
 #ifdef __HIP_DEVICE_COMPILE__
+        if constexpr(std::is_base_of<
+                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_ALIAS>,
+                         Distribution>::value
+                     || std::is_base_of<
+                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_CDF>,
+                         Distribution>::value
+                     || std::is_base_of<
+                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_UNIVERSAL>,
+                         Distribution>::value)
+            distribution.stage_to_lds(threadIdx.x, blockDim.x);
         __syncthreads();
 #endif
         while(index < vec_n)
