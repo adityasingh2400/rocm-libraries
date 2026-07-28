@@ -6789,6 +6789,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # abs prefetch is off (also -1 for Stream-K / non-gfx1250).
                                "SwInstructionPrefetchAbsBaseSgpr": int(
                                    self.states.swPrefetchAbsBaseSgpr),
+                               "WaitRepairSlotsAfterAnchor": 1,
                               }
 
       # Region-clone jobs for StinkyTofu RegionClonePass.

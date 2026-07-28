@@ -156,8 +156,9 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
             innerPM.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
         }
 
-        if (runScheduler && moduleOptions.EnableWaitAwareScheduleRepair) {
-            innerPM.addPass(createWaitAwareScheduleRepairPass());
+        if (runScheduler && moduleOptions.WaitRepairSlotsAfterAnchor > 0) {
+            innerPM.addPass(
+                createWaitAwareScheduleRepairPass(moduleOptions.WaitRepairSlotsAfterAnchor));
         }
         pm.addPass(createKernelToRegionsPassAdaptor(module, {"loopWithPrefetch", "noLoadLoopBody"},
                                                     std::move(innerPM)));

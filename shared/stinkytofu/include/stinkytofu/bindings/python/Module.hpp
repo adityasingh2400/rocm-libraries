@@ -78,7 +78,7 @@
     X(VerifyEach, bool)                           \
     X(EnableRemarks, bool)                        \
     X(EnableWaitCntInsertion, bool)               \
-    X(EnableWaitAwareScheduleRepair, bool)        \
+    X(WaitRepairSlotsAfterAnchor, int)            \
     X(EnableLoopCarriedTokenDeps, bool)           \
     X(EnableESM2, bool)                           \
     X(EnableESM2TrackValuVsrc, bool)              \
