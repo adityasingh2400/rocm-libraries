@@ -34,7 +34,9 @@ class Pass;
 ///
 /// Runs after StinkyWaitCntInsertionPass. Replays each repair segment through a
 /// stable DAG queue that preserves original program order, then reattaches exact
-/// wait groups immediately before their WMMA anchors.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createWaitAwareScheduleRepairPass();
+/// wait groups immediately before their WMMA anchors. The pass is disabled when
+/// kSlotsToMovePastAnchor is zero or negative.
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createWaitAwareScheduleRepairPass(
+    int kSlotsToMovePastAnchor = 1);
 
 }  // namespace stinkytofu

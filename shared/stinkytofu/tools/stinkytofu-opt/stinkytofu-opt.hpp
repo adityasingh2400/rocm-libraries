@@ -105,7 +105,16 @@ const std::vector<PassInfo> availablePasses = {
          return createStinkyWaitCntInsertionPass(options);
      }},
     {"WaitAwareScheduleRepairPass",
-     [](const auto&) { return createWaitAwareScheduleRepairPass(); }},
+     [](const std::vector<std::string>& args) {
+         constexpr int kDefaultSlotsToMovePastAnchor = 1;
+         const std::string prefix = "kSlotsToMovePastAnchor=";
+         for (const auto& arg : args) {
+             if (arg.starts_with(prefix))
+                 return createWaitAwareScheduleRepairPass(
+                     std::atoi(arg.substr(prefix.size()).c_str()));
+         }
+         return createWaitAwareScheduleRepairPass(kDefaultSlotsToMovePastAnchor);
+     }},
     // BuildUseDefChainPass accepts:
     //   includePseudo    — also build chains for pseudo registers (memtokens)
     //   noClearExisting  — keep any existing PHIs/chains

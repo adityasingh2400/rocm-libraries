@@ -104,8 +104,11 @@ using OrderedReadyNodeSet = std::set<DAGNode*, CompareDAGNodeByOriginalOrder>;
 /// independent from the repair heuristic.
 class WaitAnchoredPickPolicy {
    public:
-    WaitAnchoredPickPolicy(const WaitAnchorMap& waitAnchors, RegionDAG& regionDAG)
-        : waitAnchors_(waitAnchors), regionDAG_(regionDAG) {}
+    WaitAnchoredPickPolicy(const WaitAnchorMap& waitAnchors, RegionDAG& regionDAG,
+                           unsigned slotsToMovePastAnchor)
+        : waitAnchors_(waitAnchors),
+          regionDAG_(regionDAG),
+          slotsToMovePastAnchor_(slotsToMovePastAnchor) {}
 
     /// Return a policy-selected node, or nullptr to request stable baseline order.
     DAGNode* select(const OrderedReadyNodeSet& wmmaQueue,
@@ -156,11 +159,9 @@ class WaitAnchoredPickPolicy {
         }
     };
 
-    // Move this many otherwise-eligible slots past each wait anchor.
-    static constexpr unsigned kSlotsToMovePastAnchor = 1;
-
     const WaitAnchorMap& waitAnchors_;
     RegionDAG& regionDAG_;
+    const unsigned slotsToMovePastAnchor_;
     WindowState window_;
 
     /// Account for a non-WMMA pick within the active window.
@@ -201,8 +202,8 @@ class WaitAnchoredPickPolicy {
         window_.anchorInfo = &anchorInfo;
         window_.startId = currentWmma.id;
         window_.originalOtherCount = waitAnchor.id - currentWmma.id - 1;
-        window_.otherPickBudget = window_.originalOtherCount > kSlotsToMovePastAnchor
-                                      ? window_.originalOtherCount - kSlotsToMovePastAnchor
+        window_.otherPickBudget = window_.originalOtherCount > slotsToMovePastAnchor_
+                                      ? window_.originalOtherCount - slotsToMovePastAnchor_
                                       : 0;
         window_.otherPicks = 0;
         std::cerr << "[WaitAnchoredReadyQueue pickOne] armed wait anchor dagId=" << waitAnchor.id
@@ -285,8 +286,8 @@ class WaitAnchoredReadyQueue : public ReadyQueue {
    public:
     /// Create a stable queue using final wait anchors and the region DAG.
     WaitAnchoredReadyQueue(const PassContext& passCtx, const WaitAnchorMap& waitAnchors,
-                           RegionDAG& regionDAG)
-        : ReadyQueue(passCtx), policy_(waitAnchors, regionDAG) {}
+                           RegionDAG& regionDAG, unsigned slotsToMovePastAnchor)
+        : ReadyQueue(passCtx), policy_(waitAnchors, regionDAG, slotsToMovePastAnchor) {}
 
     /// Add a ready node to the matrix or non-matrix queue.
     void push(DAGNode* node) override {

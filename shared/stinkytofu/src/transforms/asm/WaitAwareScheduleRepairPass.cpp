@@ -54,7 +54,7 @@ WaitCountSpec decodeWaitSpec(const StinkyInstruction& wait) {
         if (data->kmcnt >= 0) spec.kmCount = data->kmcnt;
     }
     if (const auto* tdata = wait.getModifier<SWaitTensorCntData>()) {
-        if (tdata->tlcnt >= 0) spec.tensorCount = tdata->tlcnt;
+        if (tdata->tlcnt >= 0) spec.tensorCount = static_cast<unsigned char>(tdata->tlcnt);
     }
     return spec;
 }
@@ -117,13 +117,14 @@ bool isHardBoundary(const StinkyInstruction& inst,
 
 std::vector<StinkyInstruction*> repairSegment(const std::vector<StinkyInstruction*>& instructions,
                                               const WaitAnchorMap& anchors,
-                                              const PassContext& passCtx) {
+                                              const PassContext& passCtx,
+                                              unsigned slotsToMovePastAnchor) {
     if (instructions.empty()) return {};
 
     RegionDAG dag = buildRegisterDependencyDAG(instructions);
     addCounterOrderEdges(dag, instructions, anchors);
 
-    WaitAnchoredReadyQueue queue(passCtx, anchors, dag);
+    WaitAnchoredReadyQueue queue(passCtx, anchors, dag, slotsToMovePastAnchor);
     std::vector<StinkyInstruction*> scheduled = scheduleWithWaitAnchoredReadyQueue(dag, queue);
     assert(scheduled.size() == instructions.size() &&
            "Repair schedule must include every segment instruction exactly once");
@@ -139,7 +140,7 @@ void emitInstWithWaits(std::vector<IRBase*>& output, StinkyInstruction* inst,
     output.push_back(inst);
 }
 
-void repairBlock(BasicBlock& bb, const PassContext& passCtx) {
+void repairBlock(BasicBlock& bb, const PassContext& passCtx, unsigned slotsToMovePastAnchor) {
     std::vector<StinkyInstruction*> seq;
     seq.reserve(bb.size());
     for (IRBase& ir : bb) {
@@ -162,7 +163,8 @@ void repairBlock(BasicBlock& bb, const PassContext& passCtx) {
 
     auto flushSegment = [&]() {
         if (segment.empty()) return;
-        const std::vector<StinkyInstruction*> repaired = repairSegment(segment, anchors, passCtx);
+        const std::vector<StinkyInstruction*> repaired =
+            repairSegment(segment, anchors, passCtx, slotsToMovePastAnchor);
         for (StinkyInstruction* inst : repaired) emitInstWithWaits(output, inst, anchors);
         segment.clear();
     };
@@ -199,6 +201,9 @@ class WaitAwareScheduleRepairPass : public StinkyInstPass {
    public:
     static char ID;
 
+    explicit WaitAwareScheduleRepairPass(int kSlotsToMovePastAnchor)
+        : kSlotsToMovePastAnchor_(kSlotsToMovePastAnchor) {}
+
     const char* getName() const override {
         return "WaitAwareScheduleRepairPass";
     }
@@ -209,12 +214,17 @@ class WaitAwareScheduleRepairPass : public StinkyInstPass {
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
         (void)AM;
+        if (kSlotsToMovePastAnchor_ <= 0) return PreservedAnalyses::all();
+
         for (BasicBlock& bb : func) {
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
-            repairBlock(bb, passCtx);
+            repairBlock(bb, passCtx, static_cast<unsigned>(kSlotsToMovePastAnchor_));
         }
         return PreservedAnalyses::none();
     }
+
+   private:
+    int kSlotsToMovePastAnchor_;
 };
 
 char WaitAwareScheduleRepairPass::ID = 0;
@@ -223,8 +233,8 @@ char WaitAwareScheduleRepairPass::ID = 0;
 
 namespace stinkytofu {
 
-std::unique_ptr<Pass> createWaitAwareScheduleRepairPass() {
-    return std::make_unique<WaitAwareScheduleRepairPass>();
+std::unique_ptr<Pass> createWaitAwareScheduleRepairPass(int kSlotsToMovePastAnchor) {
+    return std::make_unique<WaitAwareScheduleRepairPass>(kSlotsToMovePastAnchor);
 }
 
 }  // namespace stinkytofu
