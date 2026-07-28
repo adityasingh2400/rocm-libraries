@@ -34,8 +34,8 @@
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 
-namespace {
-using namespace stinkytofu;
+namespace stinkytofu {
+namespace dag {
 
 // REMOVED: Local buildUseDefChain() has been replaced by stinkytofu::buildUseDefChain()
 // from BuildDefUseChain.hpp. All callers now use the shared implementation.
@@ -262,7 +262,7 @@ class ReadyQueueByDAGid : public ReadyQueue {
     }
 };
 
-DAGNode* ReadyQueueByDAGid::pickOne() {
+inline DAGNode* ReadyQueueByDAGid::pickOne() {
     assert(!queue.empty() && "Ready queue must not be empty");
     DAGNode* node = queue.top();
     queue.pop();
@@ -282,4 +282,5 @@ struct WMMAIssueConfig {
     int issueCycles = 1;  // single-WMMA issue cycles
     int issuedCount = 0;  // WMMA count in region (for barrier threshold math)
 };
-}  // namespace
+}  // namespace dag
+}  // namespace stinkytofu

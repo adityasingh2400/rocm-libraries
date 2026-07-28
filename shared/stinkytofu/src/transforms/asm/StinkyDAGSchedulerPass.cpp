@@ -45,6 +45,7 @@
 
 namespace {
 using namespace stinkytofu;
+using namespace stinkytofu::dag;
 
 // collapseExecMaskedRegions()/expandExecMaskedGroups(): see ExecMaskGrouping.hpp and
 // docs/developer/exec-mask-grouping.md.
