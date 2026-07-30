@@ -375,7 +375,7 @@ added to `pytest_add_cli_args_test_selection`. Source-path mapping for the
 widened slice (recorded here because the shorthand names differ from the file
 paths): DataType → `tensilelite/Common/DataType.py`; CommonTypes →
 `tensilelite/Common/Types.py`; ValidParameters → `tensilelite/Common/ValidParameters.py`
-(there is no `Tensile/SolutionStructs/ValidParameters.py`).
+(there is no `tensilelite/SolutionStructs/ValidParameters.py`).
 
 ## D16 — BufferLoad/BufferStore promoted to Required Parameters
 **Context** kernel basename hash changes across all archs; assembly verified unchanged/correct; no err or kernel-count changes."
