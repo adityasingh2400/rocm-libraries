@@ -109,7 +109,7 @@ void generate_kernel(EngineState* states,
     __syncthreads();
     while(index < size)
     {
-        data[index] = generator(&state);
+        data[index] = generator.generate_lds(&state);
         index += stride;
     }
     states[state_id] = state;
@@ -644,7 +644,14 @@ struct generator_uint : public generator_type
     typedef unsigned int data_type;
 
     __device__
-    data_type            operator()(Engine* state) const
+    data_type
+        operator()(Engine* state) const
+    {
+        return gpu_rand(state);
+    }
+
+    __device__
+    data_type generate_lds(Engine* state) const
     {
         return gpu_rand(state);
     }
@@ -656,7 +663,14 @@ struct generator_ullong : public generator_type
     typedef unsigned long long int data_type;
 
     __device__
-    data_type                      operator()(Engine* state) const
+    data_type
+        operator()(Engine* state) const
+    {
+        return gpu_rand(state);
+    }
+
+    __device__
+    data_type generate_lds(Engine* state) const
     {
         return gpu_rand(state);
     }
@@ -668,7 +682,14 @@ struct generator_uniform : public generator_type
     typedef float data_type;
 
     __device__
-    data_type     operator()(Engine* state) const
+    data_type
+        operator()(Engine* state) const
+    {
+        return gpu_rand_uniform(state);
+    }
+
+    __device__
+    data_type generate_lds(Engine* state) const
     {
         return gpu_rand_uniform(state);
     }
@@ -680,7 +701,13 @@ struct generator_uniform_double : public generator_type
     typedef double data_type;
 
     __device__
-    data_type      operator()(Engine* state) const
+    data_type
+        operator()(Engine* state) const
+    {
+        return gpu_rand_uniform_double(state);
+    }
+    __device__
+    data_type generate_lds(Engine* state) const
     {
         return gpu_rand_uniform_double(state);
     }
@@ -692,7 +719,13 @@ struct generator_normal : public generator_type
     typedef float data_type;
 
     __device__
-    data_type     operator()(Engine* state) const
+    data_type
+        operator()(Engine* state) const
+    {
+        return gpu_rand_normal(state);
+    }
+    __device__
+    data_type generate_lds(Engine* state) const
     {
         return gpu_rand_normal(state);
     }
@@ -704,7 +737,13 @@ struct generator_normal_double : public generator_type
     typedef double data_type;
 
     __device__
-    data_type      operator()(Engine* state) const
+    data_type
+        operator()(Engine* state) const
+    {
+        return gpu_rand_normal_double(state);
+    }
+    __device__
+    data_type generate_lds(Engine* state) const
     {
         return gpu_rand_normal_double(state);
     }
@@ -716,7 +755,13 @@ struct generator_log_normal : public generator_type
     typedef float data_type;
 
     __device__
-    data_type     operator()(Engine* state) const
+    data_type
+        operator()(Engine* state) const
+    {
+        return gpu_rand_log_normal(state, 0.f, 1.f);
+    }
+    __device__
+    data_type generate_lds(Engine* state) const
     {
         return gpu_rand_log_normal(state, 0.f, 1.f);
     }
@@ -728,7 +773,13 @@ struct generator_log_normal_double : public generator_type
     typedef double data_type;
 
     __device__
-    data_type      operator()(Engine* state) const
+    data_type
+        operator()(Engine* state) const
+    {
+        return gpu_rand_log_normal_double(state, 0., 1.);
+    }
+    __device__
+    data_type generate_lds(Engine* state) const
     {
         return gpu_rand_log_normal_double(state, 0., 1.);
     }
@@ -742,7 +793,14 @@ struct generator_poisson : public generator_type
     typedef unsigned int data_type;
 
     __device__
-    data_type            operator()(Engine* state) const
+    data_type
+        operator()(Engine* state) const
+    {
+        return gpu_rand_poisson(state, lambda);
+    }
+
+    __device__
+    data_type generate_lds(Engine* state) const
     {
         return gpu_rand_poisson(state, lambda);
     }
@@ -808,17 +866,16 @@ struct generator_discrete_poisson : public generator_type
     }
 
     __device__
+    data_type generate_lds(Engine* state) const
+    {
+        return rand_discrete(state, get_storage());
+    }
+
+    __device__
     data_type
         operator()(Engine* state) const
     {
-        if(staged)
-        {
-            return rand_discrete(state, get_storage()); // same address as above
-        }
-        else
-        {
-            return rand_discrete(state, discrete_distribution);
-        }
+        return rand_discrete(state, discrete_distribution);
     }
 
     rand_discrete_distribution_t discrete_distribution;
@@ -894,17 +951,16 @@ struct generator_discrete_custom : public generator_type
     }
 
     __device__
+    data_type generate_lds(Engine* state) const
+    {
+        return rand_discrete(state, get_storage());
+    }
+
+    __device__
     data_type
         operator()(Engine* state) const
     {
-        if(staged)
-        {
-            return rand_discrete(state, get_storage()); // same address as above
-        }
-        else
-        {
-            return rand_discrete(state, discrete_distribution);
-        }
+        return rand_discrete(state, discrete_distribution);
     }
 
     rand_discrete_distribution_t discrete_distribution;
