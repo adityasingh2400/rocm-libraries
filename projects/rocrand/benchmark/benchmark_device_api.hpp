@@ -757,6 +757,8 @@ struct generator_discrete_poisson : public generator_type
 
     typedef unsigned int data_type;
 
+    static constexpr unsigned int LDS_DISTR_MAX = 128;
+
     void create()
     {
         RAND_CHECK(rand_create_poisson_distribution(lambda, &discrete_distribution));
@@ -766,14 +768,24 @@ struct generator_discrete_poisson : public generator_type
     {
         RAND_CHECK(rand_destroy_discrete_distribution(discrete_distribution));
     }
-    
+
     __device__
-    void                         stage_to_lds(unsigned int tid, unsigned int block_size)
+    static rocrand_discrete_distribution_st* get_storage()
     {
-        constexpr unsigned int LDS_DISTR_MAX = 128;
         __shared__ rocrand_discrete_distribution_st s_dist;
-        __shared__ double s_probability[LDS_DISTR_MAX];
-        __shared__ unsigned int s_alias[LDS_DISTR_MAX];
+        __shared__ double                           s_probability[LDS_DISTR_MAX];
+        __shared__ unsigned int                     s_alias[LDS_DISTR_MAX];
+
+        // stash the array pointers into s_dist once; harmless if repeated
+        s_dist.probability = s_probability;
+        s_dist.alias       = s_alias;
+        return &s_dist;
+    }
+
+    __device__
+    void stage_to_lds(unsigned int tid, unsigned int block_size)
+    {
+        rocrand_discrete_distribution_st* s_dist = get_storage();
 
         const unsigned int dist_size = discrete_distribution->size;
         if(dist_size > LDS_DISTR_MAX)
@@ -781,30 +793,37 @@ struct generator_discrete_poisson : public generator_type
 
         if(tid == 0)
         {
-            s_dist.size        = dist_size;
-            s_dist.offset      = discrete_distribution->offset;
-            s_dist.probability = s_probability;
-            s_dist.alias       = s_alias;
-            s_dist.cdf         = nullptr;
+            s_dist->size   = dist_size;
+            s_dist->offset = discrete_distribution->offset;
+            s_dist->cdf    = nullptr;
         }
         for(unsigned int i = tid; i < dist_size; i += block_size)
         {
-            s_probability[i] = discrete_distribution->probability[i];
-            s_alias[i]       = discrete_distribution->alias[i];
+            s_dist->probability[i] = discrete_distribution->probability[i];
+            s_dist->alias[i]       = discrete_distribution->alias[i];
         }
         __syncthreads();
-        discrete_distribution = &s_dist;
+
+        staged = true;
     }
 
     __device__
-    data_type operator()(Engine* state) const
+    data_type
+        operator()(Engine* state) const
     {
-        return rand_discrete(state, discrete_distribution);
+        if(staged)
+        {
+            return rand_discrete(state, get_storage()); // same address as above
+        }
+        else
+        {
+            return rand_discrete(state, discrete_distribution);
+        }
     }
 
     rand_discrete_distribution_t discrete_distribution;
+    bool                         staged = false;
     double                       lambda;
-
 };
 
 #ifdef __HIP__
@@ -812,6 +831,8 @@ template<typename Engine>
 struct generator_discrete_custom : public generator_type
 {
     typedef unsigned int data_type;
+
+    static constexpr unsigned int LDS_DISTR_MAX = 128;
 
     void create()
     {
@@ -834,13 +855,23 @@ struct generator_discrete_custom : public generator_type
         RAND_CHECK(rand_destroy_discrete_distribution(discrete_distribution));
     }
 
-    __device__
-    void                         stage_to_lds(unsigned int tid, unsigned int block_size)
+        __device__
+    static rocrand_discrete_distribution_st* get_storage()
     {
-        constexpr unsigned int LDS_DISTR_MAX = 128;
         __shared__ rocrand_discrete_distribution_st s_dist;
-        __shared__ double s_probability[LDS_DISTR_MAX];
-        __shared__ unsigned int s_alias[LDS_DISTR_MAX];
+        __shared__ double                           s_probability[LDS_DISTR_MAX];
+        __shared__ unsigned int                     s_alias[LDS_DISTR_MAX];
+
+        // stash the array pointers into s_dist once; harmless if repeated
+        s_dist.probability = s_probability;
+        s_dist.alias       = s_alias;
+        return &s_dist;
+    }
+
+    __device__
+    void stage_to_lds(unsigned int tid, unsigned int block_size)
+    {
+        rocrand_discrete_distribution_st* s_dist = get_storage();
 
         const unsigned int dist_size = discrete_distribution->size;
         if(dist_size > LDS_DISTR_MAX)
@@ -848,28 +879,37 @@ struct generator_discrete_custom : public generator_type
 
         if(tid == 0)
         {
-            s_dist.size        = dist_size;
-            s_dist.offset      = discrete_distribution->offset;
-            s_dist.probability = s_probability;
-            s_dist.alias       = s_alias;
-            s_dist.cdf         = nullptr;
+            s_dist->size   = dist_size;
+            s_dist->offset = discrete_distribution->offset;
+            s_dist->cdf    = nullptr;
         }
         for(unsigned int i = tid; i < dist_size; i += block_size)
         {
-            s_probability[i] = discrete_distribution->probability[i];
-            s_alias[i]       = discrete_distribution->alias[i];
+            s_dist->probability[i] = discrete_distribution->probability[i];
+            s_dist->alias[i]       = discrete_distribution->alias[i];
         }
         __syncthreads();
-        discrete_distribution = &s_dist;
+
+        staged = true; 
     }
 
     __device__
-    data_type operator()(Engine* state) const
+    data_type
+        operator()(Engine* state) const
     {
-        return rand_discrete(state, discrete_distribution);
+        if(staged)
+        {
+            return rand_discrete(state, get_storage()); // same address as above
+        }
+        else
+        {
+            return rand_discrete(state, discrete_distribution);
+        }
     }
 
     rand_discrete_distribution_t discrete_distribution;
+    bool                         staged = false;
+    double                       lambda;
 };
 #endif
 

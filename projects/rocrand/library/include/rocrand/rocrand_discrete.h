@@ -60,12 +60,11 @@ namespace rocrand_device {
 namespace detail {
 
 __forceinline__ __device__ __host__
-unsigned int
-    discrete_alias(const double       x,
-                   const unsigned int size,
-                   const unsigned int offset,
-                   const unsigned int __attribute__((address_space(3))) * __restrict__ alias,
-                   const double __attribute__((address_space(3))) * __restrict__ probability)
+unsigned int discrete_alias(const double       x,
+                            const unsigned int size,
+                            const unsigned int offset,
+                            const unsigned int* __restrict__ alias,
+                            const double* __restrict__ probability)
 {
     // Calculate value using Alias table
 
@@ -80,9 +79,7 @@ unsigned int
 __forceinline__ __device__ __host__
 unsigned int discrete_alias(const double x, const rocrand_discrete_distribution_st& dis)
 {
-    using lds_uptr = const unsigned int __attribute__((address_space(3)))*;
-    using lds_dptr = const double __attribute__((address_space(3)))*;
-    return discrete_alias(x, dis.size, dis.offset, (lds_uptr)dis.alias, (lds_dptr)dis.probability);
+    return discrete_alias(x, dis.size, dis.offset, dis.alias, dis.probability);
 }
 
 __forceinline__ __device__ __host__
