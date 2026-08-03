@@ -75,6 +75,20 @@ public:
         output[0] = (*this)(input[0]);
     }
 
+    template<class T>
+    __forceinline__ __device__
+    unsigned int generate_lds(T x) const
+    {
+        return base_t::generate_lds(x);
+    }
+
+    template<class T>
+    __forceinline__ __device__
+    void generate_lds(const T (&input)[1], unsigned int output[1]) const
+    {
+        output[0] = generate_lds(input[0]);
+    }
+
     __device__
     void stage_to_lds(unsigned int tid, unsigned int block_size)
     {

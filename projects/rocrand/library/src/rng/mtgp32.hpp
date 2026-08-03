@@ -114,7 +114,12 @@ void generate(unsigned int (&input)[BlockSize][Distribution::input_width],
     }
     for(unsigned int j = 0; j < BlockSize; j++)
     {
-        distribution(input[j], output[j]);
+#ifdef __HIP_DEVICE_COMPILE__
+        if constexpr(is_discrete_distribution_v<Distribution>)
+            distribution.generate_lds(input[j], output[j]);
+        else
+#endif
+            distribution(input[j], output[j]);
     }
 }
 
@@ -129,7 +134,12 @@ void generate(unsigned int (&input)[Distribution::input_width],
     {
         input[i] = engine.next();
     }
-    distribution(input, output);
+#ifdef __HIP_DEVICE_COMPILE__
+    if constexpr(is_discrete_distribution_v<Distribution>)
+        distribution.generate_lds(input, output);
+    else
+#endif
+        distribution(input, output);
 }
 
 template<class vec_type, class T, unsigned int output_width, unsigned int BlockSize>
@@ -291,15 +301,7 @@ struct generate_mtgp
 
         vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
 #ifdef __HIP_DEVICE_COMPILE__
-        if constexpr(std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_ALIAS>,
-                         Distribution>::value
-                     || std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_CDF>,
-                         Distribution>::value
-                     || std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_UNIVERSAL>,
-                         Distribution>::value)
+        if constexpr(is_discrete_distribution_v<Distribution>)
             distribution.stage_to_lds(threadIdx.x, blockDim.x);
         __syncthreads();
 #endif

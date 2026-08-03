@@ -109,15 +109,7 @@ __host__ __device__ __forceinline__
 
         size_t index = thread_id;
 #ifdef __HIP_DEVICE_COMPILE__
-        if constexpr(std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_ALIAS>,
-                         Distribution>::value
-                     || std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_CDF>,
-                         Distribution>::value
-                     || std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_UNIVERSAL>,
-                         Distribution>::value)
+        if constexpr(is_discrete_distribution_v<Distribution>)
             distribution.stage_to_lds(threadIdx.x, blockDim.x);
         __syncthreads();
 #endif
@@ -134,7 +126,12 @@ __host__ __device__ __forceinline__
             {
                 input[i] = engine();
             }
-            distribution(input, output);
+#ifdef __HIP_DEVICE_COMPILE__
+            if constexpr(is_discrete_distribution_v<Distribution>)
+                distribution.generate_lds(input, output);
+            else
+#endif
+                distribution(input, output);
 #if defined(__gfx90a__)
             // Workaround: The compiler hoists s_waitcnt vmcnt(..) out of the loops on MI200.
             // For some reason this decreases performance of uniform distributions.
@@ -158,7 +155,12 @@ __host__ __device__ __forceinline__
                 {
                     input[i] = engine();
                 }
-                distribution(input, output);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution>)
+                    distribution.generate_lds(input, output);
+                else
+#endif
+                    distribution(input, output);
 
                 for(unsigned int o = 0; o < output_width; o++)
                 {
@@ -175,7 +177,12 @@ __host__ __device__ __forceinline__
                 {
                     input[i] = engine();
                 }
-                distribution(input, output);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution>)
+                    distribution.generate_lds(input, output);
+                else
+#endif
+                    distribution(input, output);
 
                 for(unsigned int o = 0; o < output_width; o++)
                 {

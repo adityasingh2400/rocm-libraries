@@ -111,6 +111,8 @@ struct generate_mrg
         vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
         size_t    index    = id;
 #ifdef __HIP_DEVICE_COMPILE__
+        if constexpr(is_discrete_distribution_v<Distribution>)
+            distribution.stage_to_lds(threadIdx.x, blockDim.x);
         __syncthreads();
 #endif
         while(index < vec_n)
@@ -138,7 +140,12 @@ struct generate_mrg
                 {
                     input[i] = engine();
                 }
-                distribution(input, output);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution>)
+                    distribution.generate_lds(input, output);
+                else
+#endif
+                    distribution(input, output);
 
                 for(unsigned int o = 0; o < output_width; o++)
                 {
@@ -155,7 +162,12 @@ struct generate_mrg
                 {
                     input[i] = engine();
                 }
-                distribution(input, output);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution>)
+                    distribution.generate_lds(input, output);
+                else
+#endif
+                    distribution(input, output);
 
                 for(unsigned int o = 0; o < output_width; o++)
                 {

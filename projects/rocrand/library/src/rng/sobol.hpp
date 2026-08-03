@@ -206,21 +206,18 @@ struct generate_sobol_host
                                                          scramble_constant,
                                                          offset + engine_offset);
 #ifdef __HIP_DEVICE_COMPILE__
-        if constexpr(std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_ALIAS>,
-                         Distribution>::value
-                     || std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_CDF>,
-                         Distribution>::value
-                     || std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_UNIVERSAL>,
-                         Distribution>::value)
+        if constexpr(is_discrete_distribution_v<Distribution>)
             distribution.stage_to_lds(threadIdx.x, blockDim.x);
         __syncthreads();
 #endif
         while(index < n)
         {
-            data[index] = distribution(engine.current());
+#ifdef __HIP_DEVICE_COMPILE__
+            if constexpr(is_discrete_distribution_v<Distribution>)
+                data[index] = distribution.generate_lds(engine.current());
+            else
+#endif
+                data[index] = distribution(engine.current());
             engine.discard_stride(stride);
             index += stride;
         }
@@ -245,22 +242,19 @@ struct generate_sobol_host
             // If data is not aligned by sizeof(vec_type)
             for(unsigned int o = 0; o < head_size; o++)
             {
-                data[o] = distribution(engine.current());
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution>)
+                    data[o] = distribution.generate_lds(engine.current());
+                else
+#endif
+                    data[o] = distribution(engine.current());
                 engine.discard();
             }
         }
 
         vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
 #ifdef __HIP_DEVICE_COMPILE__
-        if constexpr(std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_ALIAS>,
-                         Distribution>::value
-                     || std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_CDF>,
-                         Distribution>::value
-                     || std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_UNIVERSAL>,
-                         Distribution>::value)
+        if constexpr(is_discrete_distribution_v<Distribution>)
             distribution.stage_to_lds(threadIdx.x, blockDim.x);
         __syncthreads();
 #endif
@@ -271,7 +265,12 @@ struct generate_sobol_host
             T output[output_per_thread];
             for(unsigned int i = 0; i < output_per_thread; i++)
             {
-                output[i] = distribution(engine.current());
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution>)
+                    output[i] = distribution.generate_lds(engine.current());
+                else
+#endif
+                    output[i] = distribution(engine.current());
                 engine.discard();
             }
 
@@ -288,7 +287,12 @@ struct generate_sobol_host
             // Fill tail values (up to output_per_thread-1)
             for(unsigned int o = 0; o < tail_size; o++)
             {
-                data[n - tail_size + o] = distribution(engine.current());
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution>)
+                    data[n - tail_size + o] = distribution.generate_lds(engine.current());
+                else
+#endif
+                    data[n - tail_size + o] = distribution(engine.current());
                 engine.discard();
             }
         }

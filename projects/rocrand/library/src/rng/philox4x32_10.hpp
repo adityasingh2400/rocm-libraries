@@ -175,15 +175,7 @@ struct generate_philox
         vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
         size_t    index    = thread_id;
 #ifdef __HIP_DEVICE_COMPILE__
-        if constexpr(std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_ALIAS>,
-                         Distribution>::value
-                     || std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_CDF>,
-                         Distribution>::value
-                     || std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_UNIVERSAL>,
-                         Distribution>::value)
+        if constexpr(is_discrete_distribution_v<Distribution>)
             distribution.stage_to_lds(threadIdx.x, blockDim.x);
         __syncthreads();
 #endif
@@ -197,7 +189,12 @@ struct generate_philox
                 {
                     input[i] = vs[s * input_width + i];
                 }
-                distribution(input, output[s]);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution>)
+                    distribution.generate_lds(input, output[s]);
+                else
+#endif
+                    distribution(input, output[s]);
             }
             vec_data[index] = *reinterpret_cast<vec_type*>(output);
             // Next position
@@ -220,7 +217,12 @@ struct generate_philox
                 {
                     input[i] = engine();
                 }
-                distribution(input, output[s]);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution>)
+                    distribution.generate_lds(input, output[s]);
+                else
+#endif
+                    distribution(input, output[s]);
 
                 for(unsigned int o = 0; o < output_width; ++o)
                 {

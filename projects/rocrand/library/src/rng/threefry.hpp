@@ -133,6 +133,11 @@ struct generate_threefry
               + (thread_id == 0 ? 0 : head_size / output_width * input_width);
         engine.discard(engine_offset);
 
+#ifdef __HIP_DEVICE_COMPILE__
+        if constexpr(is_discrete_distribution_v<Distribution>)
+            distribution.stage_to_lds(threadIdx.x, blockDim.x);
+        __syncthreads();
+#endif
         // If data is not aligned by sizeof(vec_type)
         if(thread_id == 0 && head_size > 0)
         {
@@ -147,7 +152,12 @@ struct generate_threefry
                 {
                     input[i] = engine();
                 }
-                distribution(input, output[s]);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution>)
+                    distribution.generate_lds(input, output[s]);
+                else
+#endif
+                    distribution(input, output[s]);
 
                 for(unsigned int o = 0; o < output_width; ++o)
                 {
@@ -162,19 +172,6 @@ struct generate_threefry
         // Save multiple values as one vec_type
         vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
         size_t    index    = thread_id;
-#ifdef __HIP_DEVICE_COMPILE__
-        if constexpr(std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_ALIAS>,
-                         Distribution>::value
-                     || std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_CDF>,
-                         Distribution>::value
-                     || std::is_base_of<
-                         discrete_distribution_base<discrete_method::DISCRETE_METHOD_UNIVERSAL>,
-                         Distribution>::value)
-            distribution.stage_to_lds(threadIdx.x, blockDim.x);
-        __syncthreads();
-#endif
         while(index < vec_n)
         {
             const auto                                            v = engine.next_leap(stride);
@@ -185,7 +182,12 @@ struct generate_threefry
                 {
                     input[i] = vs[s * input_width + i];
                 }
-                distribution(input, output[s]);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution>)
+                    distribution.generate_lds(input, output[s]);
+                else
+#endif
+                    distribution(input, output[s]);
             }
             vec_data[index] = *reinterpret_cast<vec_type*>(output);
             // Next position
@@ -208,7 +210,12 @@ struct generate_threefry
                 {
                     input[i] = engine();
                 }
-                distribution(input, output[s]);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution>)
+                    distribution.generate_lds(input, output[s]);
+                else
+#endif
+                    distribution(input, output[s]);
 
                 for(unsigned int o = 0; o < output_width; ++o)
                 {
