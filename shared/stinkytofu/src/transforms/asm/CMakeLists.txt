@@ -11,6 +11,7 @@ target_sources(stinkytofu_objs PRIVATE
     SwInstructionPrefetchAbsDynamicPass.cpp
     PhiPlacement.cpp
     BuildDefUseChain.cpp
+    LiftAsmRegistersToSSAPass.cpp
     CFGBuilderPass.cpp
     LongBranchLoweringPass.cpp
     PeepholeOptimizationPass.cpp
