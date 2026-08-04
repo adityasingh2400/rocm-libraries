@@ -3,6 +3,7 @@
 
 target_sources(stinkytofu_objs PRIVATE
     AsmSetSymbolMap.cpp
+    CanonicalSSA.cpp
     StinkyAsmIR.cpp
     StinkyModifiers.cpp
     StinkySignature.cpp
