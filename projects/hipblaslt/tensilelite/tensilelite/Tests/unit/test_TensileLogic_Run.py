@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-Unit tests for tensilelite/TensileLogic/Run.py
+Unit tests for tensilelite/tensilelite_logic/Run.py
 """
 
 import pytest
@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from tensilelite.TensileLogic.Run import _setup, Check
+from tensilelite.tensilelite_logic.run import _setup, Check
 
 
 @pytest.mark.unit
@@ -19,11 +19,11 @@ class TestSetup:
 
     def test_setup_basic(self):
         """_setup should initialize all components"""
-        with patch('tensilelite.TensileLogic.Run.validateToolchain') as mock_validate_toolchain, \
-             patch('tensilelite.TensileLogic.Run.makeIsaInfoMap') as mock_make_isa_map, \
-             patch('tensilelite.TensileLogic.Run.assignGlobalParameters') as mock_assign_gp, \
-             patch('tensilelite.TensileLogic.Run.setVerbosity') as mock_set_verbosity, \
-             patch('tensilelite.TensileLogic.Run.parseArguments') as mock_parse_args:
+        with patch('tensilelite.tensilelite_logic.run.validateToolchain') as mock_validate_toolchain, \
+             patch('tensilelite.tensilelite_logic.run.makeIsaInfoMap') as mock_make_isa_map, \
+             patch('tensilelite.tensilelite_logic.run.assignGlobalParameters') as mock_assign_gp, \
+             patch('tensilelite.tensilelite_logic.run.setVerbosity') as mock_set_verbosity, \
+             patch('tensilelite.tensilelite_logic.run.parseArguments') as mock_parse_args:
 
             # Mock arguments
             mock_args = Mock()
@@ -61,11 +61,11 @@ class TestSetup:
 
     def test_setup_directory_glob(self):
         """_setup should glob for yaml files in directory"""
-        with patch('tensilelite.TensileLogic.Run.validateToolchain') as mock_validate_toolchain, \
-             patch('tensilelite.TensileLogic.Run.makeIsaInfoMap') as mock_make_isa_map, \
-             patch('tensilelite.TensileLogic.Run.assignGlobalParameters') as mock_assign_gp, \
-             patch('tensilelite.TensileLogic.Run.setVerbosity') as mock_set_verbosity, \
-             patch('tensilelite.TensileLogic.Run.parseArguments') as mock_parse_args:
+        with patch('tensilelite.tensilelite_logic.run.validateToolchain') as mock_validate_toolchain, \
+             patch('tensilelite.tensilelite_logic.run.makeIsaInfoMap') as mock_make_isa_map, \
+             patch('tensilelite.tensilelite_logic.run.assignGlobalParameters') as mock_assign_gp, \
+             patch('tensilelite.tensilelite_logic.run.setVerbosity') as mock_set_verbosity, \
+             patch('tensilelite.tensilelite_logic.run.parseArguments') as mock_parse_args:
 
             mock_args = Mock()
             mock_args.Verbose = 1
@@ -95,9 +95,9 @@ class TestSetup:
 
     def test_setup_exits_with_no_checks(self):
         """_setup should exit if no checks specified"""
-        with patch('tensilelite.TensileLogic.Run.parseArguments') as mock_parse_args, \
-             patch('tensilelite.TensileLogic.Run.validateToolchain') as mock_validate_toolchain, \
-             patch('tensilelite.TensileLogic.Run.setVerbosity') as mock_set_verbosity:
+        with patch('tensilelite.tensilelite_logic.run.parseArguments') as mock_parse_args, \
+             patch('tensilelite.tensilelite_logic.run.validateToolchain') as mock_validate_toolchain, \
+             patch('tensilelite.tensilelite_logic.run.setVerbosity') as mock_set_verbosity:
 
             mock_args = Mock()
             mock_args.Verbose = 1
@@ -117,9 +117,9 @@ class TestSetup:
 
     def test_setup_exits_with_no_files(self):
         """_setup should exit if no files found"""
-        with patch('tensilelite.TensileLogic.Run.validateToolchain') as mock_validate_toolchain, \
-             patch('tensilelite.TensileLogic.Run.parseArguments') as mock_parse_args, \
-             patch('tensilelite.TensileLogic.Run.setVerbosity') as mock_set_verbosity:
+        with patch('tensilelite.tensilelite_logic.run.validateToolchain') as mock_validate_toolchain, \
+             patch('tensilelite.tensilelite_logic.run.parseArguments') as mock_parse_args, \
+             patch('tensilelite.tensilelite_logic.run.setVerbosity') as mock_set_verbosity:
 
             mock_args = Mock()
             mock_args.Verbose = 1
@@ -142,11 +142,11 @@ class TestSetup:
 
     def test_setup_verbose_mode(self):
         """_setup should handle verbose mode correctly"""
-        with patch('tensilelite.TensileLogic.Run.validateToolchain') as mock_validate_toolchain, \
-             patch('tensilelite.TensileLogic.Run.makeIsaInfoMap') as mock_make_isa_map, \
-             patch('tensilelite.TensileLogic.Run.assignGlobalParameters') as mock_assign_gp, \
-             patch('tensilelite.TensileLogic.Run.setVerbosity') as mock_set_verbosity, \
-             patch('tensilelite.TensileLogic.Run.parseArguments') as mock_parse_args:
+        with patch('tensilelite.tensilelite_logic.run.validateToolchain') as mock_validate_toolchain, \
+             patch('tensilelite.tensilelite_logic.run.makeIsaInfoMap') as mock_make_isa_map, \
+             patch('tensilelite.tensilelite_logic.run.assignGlobalParameters') as mock_assign_gp, \
+             patch('tensilelite.tensilelite_logic.run.setVerbosity') as mock_set_verbosity, \
+             patch('tensilelite.tensilelite_logic.run.parseArguments') as mock_parse_args:
 
             mock_args = Mock()
             mock_args.Verbose = 2  # High verbosity
@@ -178,11 +178,11 @@ class TestSetup:
 
     def test_setup_non_verbose_mode(self):
         """_setup should not set PrintSolutionRejectionReason in non-verbose mode"""
-        with patch('tensilelite.TensileLogic.Run.validateToolchain') as mock_validate_toolchain, \
-             patch('tensilelite.TensileLogic.Run.makeIsaInfoMap') as mock_make_isa_map, \
-             patch('tensilelite.TensileLogic.Run.assignGlobalParameters') as mock_assign_gp, \
-             patch('tensilelite.TensileLogic.Run.setVerbosity') as mock_set_verbosity, \
-             patch('tensilelite.TensileLogic.Run.parseArguments') as mock_parse_args:
+        with patch('tensilelite.tensilelite_logic.run.validateToolchain') as mock_validate_toolchain, \
+             patch('tensilelite.tensilelite_logic.run.makeIsaInfoMap') as mock_make_isa_map, \
+             patch('tensilelite.tensilelite_logic.run.assignGlobalParameters') as mock_assign_gp, \
+             patch('tensilelite.tensilelite_logic.run.setVerbosity') as mock_set_verbosity, \
+             patch('tensilelite.tensilelite_logic.run.parseArguments') as mock_parse_args:
 
             mock_args = Mock()
             mock_args.Verbose = 0  # Not verbose
@@ -214,11 +214,11 @@ class TestSetup:
 
     def test_setup_with_single_file(self):
         """_setup should handle single file path correctly"""
-        with patch('tensilelite.TensileLogic.Run.validateToolchain') as mock_validate_toolchain, \
-             patch('tensilelite.TensileLogic.Run.makeIsaInfoMap') as mock_make_isa_map, \
-             patch('tensilelite.TensileLogic.Run.assignGlobalParameters') as mock_assign_gp, \
-             patch('tensilelite.TensileLogic.Run.setVerbosity') as mock_set_verbosity, \
-             patch('tensilelite.TensileLogic.Run.parseArguments') as mock_parse_args:
+        with patch('tensilelite.tensilelite_logic.run.validateToolchain') as mock_validate_toolchain, \
+             patch('tensilelite.tensilelite_logic.run.makeIsaInfoMap') as mock_make_isa_map, \
+             patch('tensilelite.tensilelite_logic.run.assignGlobalParameters') as mock_assign_gp, \
+             patch('tensilelite.tensilelite_logic.run.setVerbosity') as mock_set_verbosity, \
+             patch('tensilelite.tensilelite_logic.run.parseArguments') as mock_parse_args:
 
             mock_args = Mock()
             mock_args.Verbose = 1
@@ -251,14 +251,14 @@ class TestMain:
 
     def test_main_loads_bundled_known_bugs_only_when_requested(self):
         """The bundled resource requires the explicit parser sentinel."""
-        from Tensile.TensileLogic.ParseArguments import BUNDLED_KNOWN_BUGS
-        from Tensile.TensileLogic.Run import main
+        from tensilelite.tensilelite_logic.parse_arguments import BUNDLED_KNOWN_BUGS
+        from tensilelite.tensilelite_logic.run import main
 
-        with patch('Tensile.TensileLogic.Run.ParallelMap2') as mock_parallel_map, \
-             patch('Tensile.TensileLogic.Run.load_bundled_known_bugs') as mock_load_bundled, \
-             patch('Tensile.TensileLogic.Run.load_known_bugs') as mock_load_file, \
-             patch('Tensile.TensileLogic.Run._setup') as mock_setup, \
-             patch('Tensile.TensileLogic.Run.reset_reported_failures'), \
+        with patch('tensilelite.tensilelite_logic.run.ParallelMap2') as mock_parallel_map, \
+             patch('tensilelite.tensilelite_logic.run.load_bundled_known_bugs') as mock_load_bundled, \
+             patch('tensilelite.tensilelite_logic.run.load_known_bugs') as mock_load_file, \
+             patch('tensilelite.tensilelite_logic.run._setup') as mock_setup, \
+             patch('tensilelite.tensilelite_logic.run.reset_reported_failures'), \
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
@@ -285,12 +285,12 @@ class TestMain:
 
     def test_main_basic_execution(self):
         """main should execute full workflow"""
-        from tensilelite.TensileLogic.Run import main
+        from tensilelite.tensilelite_logic.run import main
 
-        with patch('tensilelite.TensileLogic.Run.ParallelMap2') as mock_parallel_map, \
-             patch('tensilelite.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
-             patch('tensilelite.TensileLogic.Run._setup') as mock_setup, \
-             patch('tensilelite.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+        with patch('tensilelite.tensilelite_logic.run.ParallelMap2') as mock_parallel_map, \
+             patch('tensilelite.tensilelite_logic.run.load_known_bugs') as mock_load_bugs, \
+             patch('tensilelite.tensilelite_logic.run._setup') as mock_setup, \
+             patch('tensilelite.tensilelite_logic.run.reset_reported_failures') as mock_reset, \
              patch('warnings.filterwarnings'):
 
             # Mock setup
@@ -330,12 +330,12 @@ class TestMain:
 
     def test_main_with_rejects(self):
         """main should exit with code 1 when solutions are rejected"""
-        from tensilelite.TensileLogic.Run import main
+        from tensilelite.tensilelite_logic.run import main
 
-        with patch('tensilelite.TensileLogic.Run.ParallelMap2') as mock_parallel_map, \
-             patch('tensilelite.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
-             patch('tensilelite.TensileLogic.Run._setup') as mock_setup, \
-             patch('tensilelite.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+        with patch('tensilelite.tensilelite_logic.run.ParallelMap2') as mock_parallel_map, \
+             patch('tensilelite.tensilelite_logic.run.load_known_bugs') as mock_load_bugs, \
+             patch('tensilelite.tensilelite_logic.run._setup') as mock_setup, \
+             patch('tensilelite.tensilelite_logic.run.reset_reported_failures') as mock_reset, \
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
@@ -363,12 +363,12 @@ class TestMain:
 
     def test_main_with_chip_id_failures(self):
         """main should exit with code 1 when chip ID failures occur"""
-        from tensilelite.TensileLogic.Run import main
+        from tensilelite.tensilelite_logic.run import main
 
-        with patch('tensilelite.TensileLogic.Run.ParallelMap2') as mock_parallel_map, \
-             patch('tensilelite.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
-             patch('tensilelite.TensileLogic.Run._setup') as mock_setup, \
-             patch('tensilelite.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+        with patch('tensilelite.tensilelite_logic.run.ParallelMap2') as mock_parallel_map, \
+             patch('tensilelite.tensilelite_logic.run.load_known_bugs') as mock_load_bugs, \
+             patch('tensilelite.tensilelite_logic.run._setup') as mock_setup, \
+             patch('tensilelite.tensilelite_logic.run.reset_reported_failures') as mock_reset, \
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
@@ -396,11 +396,11 @@ class TestMain:
 
     def test_main_handles_known_bugs_error(self):
         """main should exit with code 1 on known bugs loading error"""
-        from tensilelite.TensileLogic.Run import main
+        from tensilelite.tensilelite_logic.run import main
 
-        with patch('tensilelite.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
-             patch('tensilelite.TensileLogic.Run._setup') as mock_setup, \
-             patch('tensilelite.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+        with patch('tensilelite.tensilelite_logic.run.load_known_bugs') as mock_load_bugs, \
+             patch('tensilelite.tensilelite_logic.run._setup') as mock_setup, \
+             patch('tensilelite.tensilelite_logic.run.reset_reported_failures') as mock_reset, \
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
@@ -422,12 +422,12 @@ class TestMain:
 
     def test_main_aggregates_multiple_batches(self):
         """main should aggregate results from multiple batches"""
-        from tensilelite.TensileLogic.Run import main
+        from tensilelite.tensilelite_logic.run import main
 
-        with patch('tensilelite.TensileLogic.Run.ParallelMap2') as mock_parallel_map, \
-             patch('tensilelite.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
-             patch('tensilelite.TensileLogic.Run._setup') as mock_setup, \
-             patch('tensilelite.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+        with patch('tensilelite.tensilelite_logic.run.ParallelMap2') as mock_parallel_map, \
+             patch('tensilelite.tensilelite_logic.run.load_known_bugs') as mock_load_bugs, \
+             patch('tensilelite.tensilelite_logic.run._setup') as mock_setup, \
+             patch('tensilelite.tensilelite_logic.run.reset_reported_failures') as mock_reset, \
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
@@ -462,12 +462,12 @@ class TestMain:
 
     def test_main_verbose_mode_no_progress(self):
         """main should not show progress in verbose mode"""
-        from tensilelite.TensileLogic.Run import main
+        from tensilelite.tensilelite_logic.run import main
 
-        with patch('tensilelite.TensileLogic.Run.ParallelMap2') as mock_parallel_map, \
-             patch('tensilelite.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
-             patch('tensilelite.TensileLogic.Run._setup') as mock_setup, \
-             patch('tensilelite.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+        with patch('tensilelite.tensilelite_logic.run.ParallelMap2') as mock_parallel_map, \
+             patch('tensilelite.tensilelite_logic.run.load_known_bugs') as mock_load_bugs, \
+             patch('tensilelite.tensilelite_logic.run._setup') as mock_setup, \
+             patch('tensilelite.tensilelite_logic.run.reset_reported_failures') as mock_reset, \
              patch('warnings.filterwarnings'), \
              patch('threading.Thread') as mock_thread:
 
@@ -498,12 +498,12 @@ class TestMain:
 
     def test_main_strict_known_bugs_exits_on_stale(self):
         """main should exit 1 under --strict-known-bugs when a stale entry now passes"""
-        from tensilelite.TensileLogic.Run import main
+        from tensilelite.tensilelite_logic.run import main
 
-        with patch('tensilelite.TensileLogic.Run.ParallelMap2') as mock_parallel_map, \
-             patch('tensilelite.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
-             patch('tensilelite.TensileLogic.Run._setup') as mock_setup, \
-             patch('tensilelite.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+        with patch('tensilelite.tensilelite_logic.run.ParallelMap2') as mock_parallel_map, \
+             patch('tensilelite.tensilelite_logic.run.load_known_bugs') as mock_load_bugs, \
+             patch('tensilelite.tensilelite_logic.run._setup') as mock_setup, \
+             patch('tensilelite.tensilelite_logic.run.reset_reported_failures') as mock_reset, \
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
@@ -533,12 +533,12 @@ class TestMain:
 
     def test_main_stale_known_bugs_lenient_without_strict(self):
         """main should not fail on stale entries when --strict-known-bugs is off"""
-        from tensilelite.TensileLogic.Run import main
+        from tensilelite.tensilelite_logic.run import main
 
-        with patch('tensilelite.TensileLogic.Run.ParallelMap2') as mock_parallel_map, \
-             patch('tensilelite.TensileLogic.Run.load_known_bugs') as mock_load_bugs, \
-             patch('tensilelite.TensileLogic.Run._setup') as mock_setup, \
-             patch('tensilelite.TensileLogic.Run.reset_reported_failures') as mock_reset, \
+        with patch('tensilelite.tensilelite_logic.run.ParallelMap2') as mock_parallel_map, \
+             patch('tensilelite.tensilelite_logic.run.load_known_bugs') as mock_load_bugs, \
+             patch('tensilelite.tensilelite_logic.run._setup') as mock_setup, \
+             patch('tensilelite.tensilelite_logic.run.reset_reported_failures') as mock_reset, \
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()

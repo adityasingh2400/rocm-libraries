@@ -110,7 +110,7 @@ tensilelite = [
     "Source/ReductionTemplate.h",
     "Source/memory_gfx.h",
     "CustomKernels/*.s",
-    "TensileLogic/known_bugs.yaml",
+    "tensilelite_logic/known_bugs.yaml",
     "ductile/config/defaults.yaml",
 ]
 
@@ -143,10 +143,10 @@ only_mutate = [
     "tensilelite/Common/Utilities.py",
     "tensilelite/Common/Types.py",
     "tensilelite/Common/ValidParameters.py",
-    "tensilelite/TensileLogic/ValidChipId.py",
-    "tensilelite/TensileLogic/ValidMatrixInstruction.py",
-    "tensilelite/TensileLogic/ValidWorkGroup.py",
-    "tensilelite/TensileLogic/ValidWorkGroupMappingXCC.py",
+    "tensilelite/tensilelite_logic/valid_chip_id.py",
+    "tensilelite/tensilelite_logic/valid_matrix_instruction.py",
+    "tensilelite/tensilelite_logic/valid_work_group.py",
+    "tensilelite/tensilelite_logic/valid_work_group_mapping_xcc.py",
 ]
 do_not_mutate = [
     "tensilelite/Tests/*",
