@@ -172,7 +172,7 @@ inline std::vector<ActivTestCase> createBwdActivationSmokeCases()
 
     std::vector<ActivTestCase> cases;
 
-    // RELU_FWD (standard ReLU) - Only activation supported by fusion ops
+    // RELU_BWD (standard ReLU) - Only activation supported by fusion ops
     cases.emplace_back(PM::RELU_BWD,
                        std::nullopt, // reluLowerClip
                        std::nullopt, // reluUpperClip
@@ -211,7 +211,7 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
                        std::nullopt // softplusBeta
     );
 
-    // CLAMP: both lower and upper clips (e.g., clip to range [0.0, 0.5])
+    // CLAMP: both lower and upper clips (e.g., clip to range [0.1, 0.5])
     cases.emplace_back(PM::RELU_FWD,
                        0.1f, // reluLowerClip
                        0.5f, // reluUpperClip
@@ -240,7 +240,7 @@ inline std::vector<ActivTestCase> createBwdActivationFullCases()
 
     std::vector<ActivTestCase> cases;
 
-    // RELU_FWD (standard ReLU)
+    // RELU_BWD (standard ReLU)
     cases.emplace_back(PM::RELU_BWD,
                        0.0f, // reluLowerClip
                        std::nullopt, // reluUpperClip
@@ -253,14 +253,14 @@ inline std::vector<ActivTestCase> createBwdActivationFullCases()
     // ReLU6: upper clip at 6.0 (Clipped ReLU)
     cases.emplace_back(PM::RELU_BWD,
                        std::nullopt, // reluLowerClip
-                       0.5f, // reluUpperClip
+                       6.0f, // reluUpperClip
                        std::nullopt, // reluLowerClipSlope
                        std::nullopt, // swishBeta
                        std::nullopt, // eluAlpha
                        std::nullopt // softplusBeta
     );
 
-    // CLAMP: both lower and upper clips (e.g., clip to range [0.0, 6.0])
+    // CLAMP: both lower and upper clips (e.g., clip to range [0.1, 0.5])
     cases.emplace_back(PM::RELU_BWD,
                        0.1f, // reluLowerClip
                        0.5f, // reluUpperClip
