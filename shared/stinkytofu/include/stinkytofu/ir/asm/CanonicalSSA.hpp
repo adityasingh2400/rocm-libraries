@@ -24,6 +24,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -33,6 +34,7 @@
 namespace stinkytofu {
 
 class BasicBlock;
+class Function;
 struct StinkyInstruction;
 
 using SSAValueID = uint32_t;
@@ -134,6 +136,13 @@ class STINKYTOFU_EXPORT CanonicalSSA {
     const SSAInstructionInfo* findInstructionInfo(const StinkyInstruction& instruction) const;
     const std::vector<SSAPhiID>& phisForBlock(const BasicBlock& block) const;
 
+    /// Number of instructions carrying operand bindings. Verification compares
+    /// this with the instructions actually reachable from the function.
+    size_t instructionInfoCount() const;
+
+    /// Number of blocks carrying a PHI list, used for the same cross-check.
+    size_t blockPhiListCount() const;
+
    private:
     friend class CanonicalSSABuilder;
 
@@ -165,5 +174,32 @@ class STINKYTOFU_EXPORT CanonicalSSABuilder {
    private:
     CanonicalSSA ssa_;
 };
+
+/// All invariant violations found in one graph, in deterministic order.
+struct STINKYTOFU_EXPORT CanonicalSSAVerificationResult {
+    std::vector<std::string> errors;
+
+    bool ok() const {
+        return errors.empty();
+    }
+
+    /// One diagnostic per line; empty when the graph is valid.
+    std::string toString() const;
+};
+
+/// Check the canonical SSA invariants of \p ssa against \p function.
+///
+/// Verified: graph ownership and dense IDs, one definition per value,
+/// definition/use symmetry with operand bindings, operand widths and origin
+/// agreement with the physical operands, PHI predecessor coverage and
+/// ordering, and same-block definition-before-use ordering.
+///
+/// Cross-block dominance requires dominance info and is checked separately by
+/// the lifting pass.
+STINKYTOFU_EXPORT CanonicalSSAVerificationResult verifyCanonicalSSA(const Function& function,
+                                                                    const CanonicalSSA& ssa);
+
+/// Verify the sidecar attached to \p function. Reports an error when none is.
+STINKYTOFU_EXPORT CanonicalSSAVerificationResult verifyCanonicalSSA(const Function& function);
 
 }  // namespace stinkytofu

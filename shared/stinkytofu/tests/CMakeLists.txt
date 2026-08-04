@@ -64,6 +64,8 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/LegalizationUtilsTest.cpp
     unit/asm/VirtualRegisterTest.cpp
     unit/asm/CanonicalSSATest.cpp
+    unit/asm/CanonicalSSAVerifierTest.cpp
+    unit/asm/CanonicalSSAPrinterTest.cpp
     # Parser/Lexer Tests (added for critical testing gaps)
     unit/asm/IRLexerTest.cpp
     unit/asm/IRParserTest.cpp
