@@ -38,7 +38,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
-from tensilelite import GENERATOR_VERSION as __version__, TENSILELITE_CLIENT_PATH
+from tensilelite import GENERATOR_VERSION as __version__
 from tensilelite.Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
                            DebugConfig, IsaVersion, coVersionMap
@@ -575,8 +575,6 @@ def Tensile(userArgs):
     # restoreDefaultGlobalParameters() (which would otherwise clobber it back to the
     # default False). Kept out of the documented --global-parameters surface.
     globalParameters["CpuOnly"] = args.cpuOnly
-    globalParameters["ClientExecutable"] = str(TENSILELITE_CLIENT_PATH)
-
     if args.LogicFormat:
         globalParameters['LogicFormat'] = args.LogicFormat
     if args.LibraryFormat:

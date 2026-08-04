@@ -36,16 +36,6 @@ from pathlib import Path
 from timeit import default_timer as timer
 from typing import Collection, List, NamedTuple, Optional, Union
 
-from Tensile.Common import (
-)
-
-from Tensile.KernelWriterBase import (
-)
-from Tensile.SolutionStructs.Solution import (
-)
-from Tensile.Toolchain.Validators import (
-)
-
 from ..resources import copy_static_headers
 
 
@@ -96,7 +86,6 @@ from tensilelite.Toolchain.Validators import (
 from tensilelite.Toolchain.Component import Assembler
 from tensilelite.Utilities.Decorators.Profile import profile
 from tensilelite.Utilities.Decorators.Timing import timing
-from ..Resources import copy_static_headers
 
 ################################################################################
 #
