@@ -12,6 +12,7 @@ target_sources(stinkytofu_objs PRIVATE
     PhiPlacement.cpp
     BuildDefUseChain.cpp
     LiftAsmRegistersToSSAPass.cpp
+    DumpCanonicalSSAPass.cpp
     TransientRegisterAnalysisCleanup.cpp
     CFGBuilderPass.cpp
     LongBranchLoweringPass.cpp

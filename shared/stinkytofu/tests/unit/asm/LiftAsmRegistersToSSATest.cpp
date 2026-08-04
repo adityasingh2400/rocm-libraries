@@ -22,11 +22,15 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <sstream>
 #include <string>
 
+#include "CanonicalSSATestUtils.hpp"
 #include "PhiTestFixtures.hpp"
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -40,6 +44,7 @@
 #include "stinkytofu/serialization/asm/CanonicalSSAPrinter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
+#include "stinkytofu/transforms/asm/DumpCanonicalSSAPass.hpp"
 #include "stinkytofu/transforms/asm/LiftAsmRegistersToSSAPass.hpp"
 
 using namespace stinkytofu;
@@ -1069,6 +1074,108 @@ TEST_F(LiftAsmRegistersToSSAPassTest, RemovesAnalysisPhisAndChainsBeforeLifting)
     }
     EXPECT_TRUE(cfg.hUse->getSources().empty());
     EXPECT_GT(cfgFunc.getCanonicalSSA().phiCount(), 0u);
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, DumpPassPrintsTheAttachedSidecar) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+    runPass();
+    ASSERT_TRUE(func->hasCanonicalSSA());
+
+    std::ostringstream captured;
+    std::streambuf* previous = std::cout.rdbuf(captured.rdbuf());
+    createDumpCanonicalSSAPass()->run(*func, passCtx, am);
+    std::cout.rdbuf(previous);
+
+    EXPECT_EQ(captured.str(), canonicalSSAToString(*func));
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, DumpPassLeavesTheFunctionUnchanged) {
+    createDsReadB128InBlock(entry, kArch, 4, 0);
+    createVAddInBlock(entry, kArch, 8, 4, 5);
+    runPass();
+    const std::string before = physicalIR();
+
+    std::ostringstream captured;
+    std::streambuf* previous = std::cout.rdbuf(captured.rdbuf());
+    const PreservedAnalyses preserved = createDumpCanonicalSSAPass()->run(*func, passCtx, am);
+    std::cout.rdbuf(previous);
+
+    EXPECT_EQ(physicalIR(), before);
+    EXPECT_TRUE(func->hasCanonicalSSA());
+    EXPECT_TRUE(preserved.areAllPreserved());
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, DumpPassReportsAMissingSidecar) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+
+    std::ostringstream captured;
+    std::ostringstream capturedErr;
+    std::streambuf* previousOut = std::cout.rdbuf(captured.rdbuf());
+    std::streambuf* previousErr = std::cerr.rdbuf(capturedErr.rdbuf());
+    createDumpCanonicalSSAPass()->run(*func, passCtx, am);
+    std::cout.rdbuf(previousOut);
+    std::cerr.rdbuf(previousErr);
+
+    EXPECT_TRUE(captured.str().empty()) << captured.str();
+    EXPECT_TRUE(contains(capturedErr.str(), "has no canonical SSA attached")) << capturedErr.str();
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, DumpPassCanPrintAPlaceholderInstead) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+
+    DumpCanonicalSSAConfig config;
+    config.requireCanonicalSSA = false;
+
+    std::ostringstream captured;
+    std::streambuf* previous = std::cout.rdbuf(captured.rdbuf());
+    createDumpCanonicalSSAPass(config)->run(*func, passCtx, am);
+    std::cout.rdbuf(previous);
+
+    EXPECT_TRUE(contains(captured.str(), "<no canonical SSA attached>")) << captured.str();
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, DumpPassWritesToAFileWhenAsked) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+    runPass();
+
+    const std::string path =
+        std::filesystem::temp_directory_path() / "stinkytofu_dump_canonical_ssa_test.ssa";
+    DumpCanonicalSSAConfig config;
+    config.outputPath = path;
+    createDumpCanonicalSSAPass(config)->run(*func, passCtx, am);
+
+    std::ifstream file(path);
+    ASSERT_TRUE(file.is_open());
+    const std::string contents((std::istreambuf_iterator<char>(file)),
+                               std::istreambuf_iterator<char>());
+    file.close();
+    std::filesystem::remove(path);
+
+    EXPECT_EQ(contents, canonicalSSAToString(*func));
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, DumpPassReportsVerificationFailures) {
+    StinkyInstruction* add = createVAddInBlock(entry, kArch, 2, 0, 1);
+
+    // Attach a deliberately broken graph: the use record mirroring src0 is
+    // missing, which the verifier must catch before the dump is trusted.
+    CanonicalSSABuilder builder;
+    const SSAValueID in0 = addLiveIn(builder, 0);
+    const SSAValueID in1 = addLiveIn(builder, 1);
+    bindInstruction(builder, *add, {{in0}, {in1}});
+    builder.value(in0).uses.clear();
+    func->setCanonicalSSA(std::make_unique<CanonicalSSA>(builder.take()));
+
+    std::ostringstream captured;
+    std::streambuf* previous = std::cout.rdbuf(captured.rdbuf());
+    createDumpCanonicalSSAPass()->run(*func, passCtx, am);
+    std::cout.rdbuf(previous);
+
+    const std::string text = captured.str();
+    EXPECT_TRUE(contains(text, "// canonical SSA verification failed:")) << text;
+    EXPECT_TRUE(contains(text, "records this slot 0 time(s)")) << text;
+    // The dump still follows, so a malformed graph stays inspectable.
+    EXPECT_TRUE(contains(text, "ssa.func @kernel")) << text;
 }
 
 TEST_F(LiftAsmRegistersToSSAPassTest, PreservesCFGAnalyses) {

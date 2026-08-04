@@ -35,12 +35,14 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/DumpCanonicalSSAPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertInitialUnclausedVmemPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
+#include "stinkytofu/transforms/asm/LiftAsmRegistersToSSAPass.hpp"
 #include "stinkytofu/transforms/asm/LongBranchLoweringPass.hpp"
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
 #include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
@@ -113,6 +115,32 @@ const std::vector<PassInfo> availablePasses = {
          return createBuildUseDefChainPass(clearExisting, includePseudo);
      }},
     {"CFGBuilderPass", [](const auto&) { return createCFGBuilderPass(); }},
+    // LiftAsmRegistersToSSAPass accepts:
+    //   strictLiveIns  — reject a read with no reaching definition instead of
+    //                    inferring a function live-in
+    //   noVerify       — skip canonical SSA verification after construction
+    {"LiftAsmRegistersToSSAPass",
+     [](const std::vector<std::string>& args) {
+         LiftAsmRegistersToSSAOptions options;
+         options.allowInferredLiveIns = !hasPassArg(args, "strictLiveIns");
+         options.verify = !hasPassArg(args, "noVerify");
+         return createLiftAsmRegistersToSSAPass(options);
+     }},
+    // DumpCanonicalSSAPass writes the sidecar to stdout. Accepts:
+    //   uses          — also print each value's exact use list
+    //   noProvenance  — omit physical register origins
+    //   noPhysical    — omit the trailing physical-instruction comment
+    //   allowMissing  — print a placeholder instead of erroring when a function
+    //                   has no sidecar
+    {"DumpCanonicalSSAPass",
+     [](const std::vector<std::string>& args) {
+         DumpCanonicalSSAConfig config;
+         config.printerOptions.printUses = hasPassArg(args, "uses");
+         config.printerOptions.printProvenance = !hasPassArg(args, "noProvenance");
+         config.printerOptions.printPhysicalInstruction = !hasPassArg(args, "noPhysical");
+         config.requireCanonicalSSA = !hasPassArg(args, "allowMissing");
+         return createDumpCanonicalSSAPass(config);
+     }},
     {"DumpStinkyModulePass",
      [](const auto&) { return createDumpStinkyModulePass({.stirPath = "dump_module.stir"}); }},
     {"PeepholeOptimizationPass", [](const auto&) { return createPeepholeOptimizationPass(); }},

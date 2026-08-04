@@ -1,0 +1,23 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --DumpCanonicalSSAPass=allowMissing --print-output
+#
+# LiftAsmRegistersToSSAPass: unsupported input leaves the function untouched.
+#
+# SGPRs are not lifted yet, so this function gets no canonical SSA. That is the
+# fallback contract: lifting reports a missed optimization rather than failing
+# the compilation, and consumers check hasCanonicalSSA() before using the
+# sidecar. The physical instruction stream must survive unchanged so the legacy
+# path still works.
+#
+# CHECK-LABEL: ssa.func @lift_asm_registers_to_ssa_unsupported
+# CHECK-NEXT: <no canonical SSA attached>
+#
+# The physical program is still intact, SGPR operand included.
+# CHECK-LABEL: @lift_asm_registers_to_ssa_unsupported
+# CHECK: s4
+# CHECK: "st.v_add_f32"
+
+st.func @lift_asm_registers_to_ssa_unsupported() {
+^entry:
+  v2 = "st.v_mov_b32"(s4)
+  v3 = "st.v_add_f32"(v2, v1)
+}
