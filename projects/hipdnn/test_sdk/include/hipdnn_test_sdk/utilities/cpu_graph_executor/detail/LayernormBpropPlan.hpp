@@ -68,7 +68,7 @@ struct LayernormBpropParams
 template <typename DyDataType,
           typename ScaleBiasDataType,
           typename MeanInvVarianceDataType,
-          typename OutputDataType,
+          typename DxDataType,
           typename ComputeDataType>
 class LayernormBpropPlan : public IGraphNodePlanExecutor
 {
@@ -89,7 +89,7 @@ public:
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
 
         auto shallowXTensor
-            = createShallowTensor<DyDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
+            = createShallowTensor<DxDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
 
         auto shallowScaleTensor = createShallowTensor<ScaleBiasDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
@@ -109,7 +109,7 @@ public:
                 variantPack.at(_params.invVarianceTensor.value().uid));
         }
 
-        auto shallowDxTensor = createShallowTensor<OutputDataType>(
+        auto shallowDxTensor = createShallowTensor<DxDataType>(
             _params.dxTensor, variantPack.at(_params.dxTensor.uid));
 
         auto shallowDscaleTensor = createShallowTensor<ScaleBiasDataType>(
@@ -128,7 +128,7 @@ public:
 
         utilities::CpuFpReferenceLayernorm::bprop<DyDataType,
                                                   ScaleBiasDataType,
-                                                  OutputDataType,
+                                                  DxDataType,
                                                   MeanInvVarianceDataType,
                                                   ComputeDataType>(*shallowDyTensor,
                                                                    *shallowXTensor,
