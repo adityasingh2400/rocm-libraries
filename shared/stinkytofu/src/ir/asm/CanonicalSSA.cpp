@@ -31,6 +31,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "stinkytofu/analysis/controlflow/Dominance.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
@@ -180,11 +181,23 @@ size_t countPhiUses(const SSAValue& value, SSAPhiID phi, const BasicBlock* prede
     return matches;
 }
 
+/// True when \p edge is the first slot carrying its (predecessor, value) pair.
+/// Used to report duplicate predecessor edges once, in slot order.
+bool isFirstEdgeOfGroup(const SSAPhi& phi, size_t edge) {
+    for (size_t earlier = 0; earlier < edge; ++earlier) {
+        if (phi.incoming[earlier].predecessor == phi.incoming[edge].predecessor &&
+            phi.incoming[earlier].value == phi.incoming[edge].value)
+            return false;
+    }
+    return true;
+}
+
 /// Verifies one sidecar. Diagnostics are emitted in function/graph order so
 /// repeated runs produce identical output.
 class Verifier {
    public:
-    Verifier(const Function& function, const CanonicalSSA& ssa) : function_(function), ssa_(ssa) {
+    Verifier(const Function& function, const CanonicalSSA& ssa, const DominanceInfo* dominance)
+        : function_(function), ssa_(ssa), dominance_(dominance) {
         uint32_t blockIndex = 0;
         uint32_t instructionIndex = 0;
         for (const BasicBlock& bb : function_) {
@@ -252,8 +265,27 @@ class Verifier {
     void checkPhis();
     void checkBlockPhiIndex();
 
+    /// Block holding the definition of \p value, or null when it has none.
+    const BasicBlock* definitionBlock(const SSAValue& value) const {
+        switch (value.kind) {
+            case SSAValueKind::InstructionDef: {
+                auto it = instructionBlock_.find(value.definingInstruction);
+                return it == instructionBlock_.end() ? nullptr : it->second;
+            }
+            case SSAValueKind::Phi:
+                return ssa_.containsPhi(value.definingPhi) ? ssa_.phi(value.definingPhi).block
+                                                           : nullptr;
+            case SSAValueKind::LiveIn:
+            case SSAValueKind::Undef:
+                // Entry values are available everywhere.
+                return function_.empty() ? nullptr : &*function_.begin();
+        }
+        return nullptr;
+    }
+
     const Function& function_;
     const CanonicalSSA& ssa_;
+    const DominanceInfo* dominance_ = nullptr;
 
     std::unordered_map<const BasicBlock*, uint32_t> blockOrder_;
     std::unordered_map<const StinkyInstruction*, uint32_t> instructionOrder_;
@@ -409,18 +441,26 @@ void Verifier::checkValueUses(const SSAValue& value) {
             }
         }
 
-        // Same-block ordering: sources are read before destinations are defined,
-        // so a definition must appear strictly earlier than its use.
-        if (value.kind != SSAValueKind::InstructionDef) continue;
-        if (!knownInstruction(value.definingInstruction)) continue;
-        const BasicBlock* defBlock = instructionBlock_.at(value.definingInstruction);
         const BasicBlock* useBlock = instructionBlock_.at(use.instruction);
-        if (defBlock != useBlock) continue;
-        if (instructionOrder_.at(value.definingInstruction) >=
-            instructionOrder_.at(use.instruction)) {
-            error(self + " is defined by " + instructionRef(value.definingInstruction) +
-                  " but used earlier or at the same position by " +
-                  instructionRef(use.instruction) + " in " + blockRef(defBlock));
+        const BasicBlock* defBlock = definitionBlock(value);
+
+        if (value.kind == SSAValueKind::InstructionDef &&
+            knownInstruction(value.definingInstruction) && defBlock == useBlock) {
+            // Same block: sources are read before destinations are defined, so
+            // the definition must appear strictly earlier than the use.
+            if (instructionOrder_.at(value.definingInstruction) >=
+                instructionOrder_.at(use.instruction)) {
+                error(self + " is defined by " + instructionRef(value.definingInstruction) +
+                      " but used earlier or at the same position by " +
+                      instructionRef(use.instruction) + " in " + blockRef(defBlock));
+            }
+            continue;
+        }
+
+        if (dominance_ != nullptr && defBlock != nullptr &&
+            !dominates(*dominance_, defBlock, useBlock)) {
+            error(self + " is defined in " + blockRef(defBlock) + ", which does not dominate " +
+                  blockRef(useBlock) + " where " + instructionRef(use.instruction) + " uses it");
         }
     }
 }
@@ -588,11 +628,33 @@ void Verifier::checkPhis() {
                       regKeyToString(value.origin) + ", but " + self + " has origin " +
                       regKeyToString(phi.origin));
             }
-            const size_t matches = countPhiUses(value, phi.id, incoming.predecessor);
-            if (matches != 1) {
-                error(slot + " carries " + valueRef(incoming.value) +
-                      ", whose use list records this edge " + std::to_string(matches) +
-                      " time(s) (expected 1)");
+
+            if (dominance_ != nullptr && knownBlock(incoming.predecessor)) {
+                // A PHI input is used on the edge, so it must dominate the end
+                // of the predecessor rather than the PHI's own block.
+                const BasicBlock* defBlock = definitionBlock(value);
+                if (defBlock != nullptr &&
+                    !dominates(*dominance_, defBlock, incoming.predecessor)) {
+                    error(slot + " carries " + valueRef(incoming.value) + " defined in " +
+                          blockRef(defBlock) + ", which does not dominate predecessor " +
+                          blockRef(incoming.predecessor));
+                }
+            }
+
+            // A block may appear as a predecessor more than once, so the number
+            // of expected use records is the number of matching edge slots.
+            if (isFirstEdgeOfGroup(phi, edge)) {
+                size_t slots = 0;
+                for (const SSAPhiIncoming& other : phi.incoming) {
+                    if (other.predecessor == incoming.predecessor && other.value == incoming.value)
+                        ++slots;
+                }
+                const size_t matches = countPhiUses(value, phi.id, incoming.predecessor);
+                if (matches != slots) {
+                    error(slot + " carries " + valueRef(incoming.value) +
+                          ", whose use list records this edge " + std::to_string(matches) +
+                          " time(s) (expected " + std::to_string(slots) + ")");
+                }
             }
         }
     }
@@ -636,7 +698,12 @@ void Verifier::checkBlockPhiIndex() {
 
 CanonicalSSAVerificationResult verifyCanonicalSSA(const Function& function,
                                                   const CanonicalSSA& ssa) {
-    return Verifier(function, ssa).run();
+    return Verifier(function, ssa, /*dominance=*/nullptr).run();
+}
+
+CanonicalSSAVerificationResult verifyCanonicalSSA(const Function& function, const CanonicalSSA& ssa,
+                                                  const DominanceInfo& dominance) {
+    return Verifier(function, ssa, &dominance).run();
 }
 
 CanonicalSSAVerificationResult verifyCanonicalSSA(const Function& function) {

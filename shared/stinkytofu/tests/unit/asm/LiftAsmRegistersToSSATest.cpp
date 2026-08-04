@@ -27,8 +27,10 @@
 #include <sstream>
 #include <string>
 
+#include "PhiTestFixtures.hpp"
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/analysis/controlflow/Dominance.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
@@ -167,10 +169,13 @@ TEST_F(LiftAsmRegistersToSSATest, ReadModifyWriteReadsTheOldValueAndDefinesANewO
     createVAddInBlock(entry, kArch, /*dest=*/2, /*src0=*/2, /*src1=*/1);
 
     const CanonicalSSA ssa = lift();
+    // Live-ins v1 and v2 are created first, in register order, then the result.
     ASSERT_EQ(ssa.valueCount(), 3u);
-    const SSAValueID incoming = 1;
+    const SSAValueID incoming = 2;
     EXPECT_EQ(ssa.value(incoming).kind, SSAValueKind::LiveIn);
     EXPECT_EQ(ssa.value(incoming).origin.idx, 2u);
+    ASSERT_EQ(ssa.value(incoming).uses.size(), 1u);
+    EXPECT_EQ(ssa.value(incoming).uses[0].operand, 0u);
 
     const SSAValueID defined = 3;
     EXPECT_EQ(ssa.value(defined).kind, SSAValueKind::InstructionDef);
@@ -280,16 +285,17 @@ TEST_F(LiftAsmRegistersToSSATest, StrictModeAcceptsFullyDefinedCode) {
         EXPECT_EQ(value.kind, SSAValueKind::InstructionDef);
 }
 
-TEST_F(LiftAsmRegistersToSSATest, RejectsMultipleBasicBlocks) {
-    func->createBasicBlock("second");
+TEST_F(LiftAsmRegistersToSSATest, RejectsUnreachableBlocks) {
+    func->createBasicBlock("orphan");
     const std::string error = liftError();
-    EXPECT_TRUE(contains(error, "requires a single basic block")) << error;
+    EXPECT_TRUE(contains(error, "^orphan is unreachable from the entry")) << error;
 }
 
-TEST_F(LiftAsmRegistersToSSATest, RejectsBlockWithIncomingEdges) {
+TEST_F(LiftAsmRegistersToSSATest, RejectsEntryBlockThatIsALoopHeader) {
+    // A live-in arriving at a loop header has no predecessor edge to merge on.
     func->addEdge(entry, entry);
     const std::string error = liftError();
-    EXPECT_TRUE(contains(error, "incoming edges")) << error;
+    EXPECT_TRUE(contains(error, "the entry must not be a loop header")) << error;
 }
 
 TEST_F(LiftAsmRegistersToSSATest, RejectsTemplateVirtualRegisters) {
@@ -390,6 +396,296 @@ TEST_F(LiftAsmRegistersToSSATest, FailureLeavesNoGraphBehind) {
 }
 
 // ---------------------------------------------------------------------------
+// Control flow: PHI placement and dominator-tree renaming
+// ---------------------------------------------------------------------------
+
+namespace {
+
+class LiftCfgTest : public ::testing::Test {
+   protected:
+    void SetUp() override {
+        func = std::make_unique<Function>("kernel");
+    }
+
+    CanonicalSSA lift() {
+        Expected<CanonicalSSA> result = liftAsmRegistersToSSA(*func);
+        EXPECT_TRUE(result.hasValue()) << (result.hasValue() ? "" : result.getError());
+        if (!result.hasValue()) return CanonicalSSA{};
+
+        // Dominance-aware verification is the real check for these CFGs.
+        const DominanceInfo dominance = computeDominanceInfo(*func);
+        const CanonicalSSAVerificationResult verification =
+            verifyCanonicalSSA(*func, *result, dominance);
+        EXPECT_TRUE(verification.ok()) << verification.toString();
+        return std::move(*result);
+    }
+
+    /// PHI for \p vgpr in \p block, or null when none was placed.
+    static const SSAPhi* phiFor(const CanonicalSSA& ssa, const BasicBlock& block, unsigned vgpr) {
+        for (SSAPhiID id : ssa.phisForBlock(block)) {
+            if (ssa.phi(id).origin.idx == vgpr) return &ssa.phi(id);
+        }
+        return nullptr;
+    }
+
+    static size_t phiCountIn(const CanonicalSSA& ssa, const BasicBlock& block) {
+        return ssa.phisForBlock(block).size();
+    }
+
+    /// SSA value bound to source operand \p operand of \p instruction.
+    static SSAValueID sourceValue(const CanonicalSSA& ssa, const StinkyInstruction& instruction,
+                                  size_t operand) {
+        const SSAInstructionInfo* info = ssa.findInstructionInfo(instruction);
+        if (info == nullptr || operand >= info->sources.size()) return kInvalidSSAValueID;
+        const std::vector<SSAValueID>& units = info->sources[operand].units;
+        return units.empty() ? kInvalidSSAValueID : units.front();
+    }
+
+    static SSAValueID definedValue(const CanonicalSSA& ssa, const StinkyInstruction& instruction,
+                                   size_t unit = 0) {
+        const SSAInstructionInfo* info = ssa.findInstructionInfo(instruction);
+        if (info == nullptr || info->destinations.empty()) return kInvalidSSAValueID;
+        const std::vector<SSAValueID>& units = info->destinations.front().units;
+        return unit < units.size() ? units[unit] : kInvalidSSAValueID;
+    }
+
+    std::unique_ptr<Function> func;
+};
+
+}  // namespace
+
+TEST_F(LiftCfgTest, DiamondPlacesOnePhiAtTheJoin) {
+    BasicBlock* entry = func->createBasicBlock("entry");
+    setFunctionArch(*func, kArch);
+    BasicBlock* left = func->createBasicBlock("left");
+    BasicBlock* right = func->createBasicBlock("right");
+    BasicBlock* join = func->createBasicBlock("join");
+    func->addEdge(entry, left);
+    func->addEdge(entry, right);
+    func->addEdge(left, join);
+    func->addEdge(right, join);
+
+    StinkyInstruction* leftDef = createVAddInBlock(left, kArch, 5, 20, 21);
+    StinkyInstruction* rightDef = createVAddInBlock(right, kArch, 5, 22, 23);
+    StinkyInstruction* use = createVAddInBlock(join, kArch, 6, 5, 5);
+
+    const CanonicalSSA ssa = lift();
+
+    const SSAPhi* phi = phiFor(ssa, *join, 5);
+    ASSERT_NE(phi, nullptr);
+    EXPECT_EQ(phiCountIn(ssa, *join), 1u);
+    ASSERT_EQ(phi->incoming.size(), 2u);
+    EXPECT_EQ(phi->incoming[0].predecessor, left);
+    EXPECT_EQ(phi->incoming[0].value, definedValue(ssa, *leftDef));
+    EXPECT_EQ(phi->incoming[1].predecessor, right);
+    EXPECT_EQ(phi->incoming[1].value, definedValue(ssa, *rightDef));
+    EXPECT_EQ(sourceValue(ssa, *use, 0), phi->result);
+}
+
+TEST_F(LiftCfgTest, ValueDefinedInADominatorNeedsNoPhi) {
+    BasicBlock* entry = func->createBasicBlock("entry");
+    setFunctionArch(*func, kArch);
+    BasicBlock* left = func->createBasicBlock("left");
+    BasicBlock* right = func->createBasicBlock("right");
+    BasicBlock* join = func->createBasicBlock("join");
+    func->addEdge(entry, left);
+    func->addEdge(entry, right);
+    func->addEdge(left, join);
+    func->addEdge(right, join);
+
+    StinkyInstruction* def = createVAddInBlock(entry, kArch, 5, 20, 21);
+    StinkyInstruction* use = createVAddInBlock(join, kArch, 6, 5, 5);
+
+    const CanonicalSSA ssa = lift();
+
+    EXPECT_EQ(phiCountIn(ssa, *join), 0u);
+    EXPECT_EQ(sourceValue(ssa, *use, 0), definedValue(ssa, *def));
+}
+
+TEST_F(LiftCfgTest, DefinedButNeverReadNeedsNoPhi) {
+    DeadRegCfg cfg = buildDeadRegCfg(*func, kArch);
+
+    const CanonicalSSA ssa = lift();
+
+    // v0 merges at C but is never read, so pruning places no PHI at all.
+    EXPECT_EQ(ssa.phiCount(), 0u);
+    EXPECT_NE(definedValue(ssa, *cfg.aDef), kInvalidSSAValueID);
+}
+
+TEST_F(LiftCfgTest, IteratedDominanceFrontierPlacesPhisAtBothJoins) {
+    IteratedDFCfg cfg = buildIteratedDFCfg(*func, kArch);
+
+    const CanonicalSSA ssa = lift();
+
+    const SSAPhi* gPhi = phiFor(ssa, *cfg.G, 0);
+    const SSAPhi* hPhi = phiFor(ssa, *cfg.H, 0);
+    ASSERT_NE(gPhi, nullptr);
+    ASSERT_NE(hPhi, nullptr);
+
+    EXPECT_EQ(sourceValue(ssa, *cfg.gUse, 0), gPhi->result);
+    EXPECT_EQ(sourceValue(ssa, *cfg.hUse, 0), hPhi->result);
+
+    // H merges the value coming through G with the one from entry via D.
+    ASSERT_EQ(hPhi->incoming.size(), 2u);
+    EXPECT_EQ(hPhi->incoming[0].value, definedValue(ssa, *cfg.entryDef));
+    EXPECT_EQ(hPhi->incoming[1].value, gPhi->result);
+}
+
+TEST_F(LiftCfgTest, LastDefinitionInABlockWins) {
+    RedefSameBlockCfg cfg = buildRedefSameBlockCfg(*func, kArch);
+
+    const CanonicalSSA ssa = lift();
+
+    const SSAPhi* phi = phiFor(ssa, *cfg.C, 0);
+    ASSERT_NE(phi, nullptr);
+    ASSERT_EQ(phi->incoming.size(), 2u);
+    EXPECT_EQ(phi->incoming[0].value, definedValue(ssa, *cfg.aDef2));
+    EXPECT_NE(phi->incoming[0].value, definedValue(ssa, *cfg.aDef1));
+    EXPECT_EQ(phi->incoming[1].value, definedValue(ssa, *cfg.bDef));
+}
+
+TEST_F(LiftCfgTest, ChainOfDiamondsPlacesOnePhiPerJoin) {
+    ChainOfDiamondsCfg cfg = buildChainOfDiamondsCfg(*func, kArch);
+
+    const CanonicalSSA ssa = lift();
+
+    ASSERT_NE(phiFor(ssa, *cfg.C, 0), nullptr);
+    ASSERT_NE(phiFor(ssa, *cfg.F, 0), nullptr);
+    ASSERT_NE(phiFor(ssa, *cfg.I, 0), nullptr);
+    EXPECT_EQ(sourceValue(ssa, *cfg.iUse, 0), phiFor(ssa, *cfg.I, 0)->result);
+}
+
+TEST_F(LiftCfgTest, LoopHeaderPhisMergeEntryAndBackEdge) {
+    NestedLoopCfg cfg = buildNestedLoopCfg(*func, kArch);
+
+    const CanonicalSSA ssa = lift();
+
+    const SSAPhi* aPhi = phiFor(ssa, *cfg.A, 0);
+    const SSAPhi* bPhi = phiFor(ssa, *cfg.B, 0);
+    ASSERT_NE(aPhi, nullptr);
+    ASSERT_NE(bPhi, nullptr);
+
+    // Outer header merges the entry definition with the value from the latch.
+    ASSERT_EQ(aPhi->incoming.size(), 2u);
+    EXPECT_EQ(aPhi->incoming[0].predecessor, cfg.entry);
+    EXPECT_EQ(aPhi->incoming[0].value, definedValue(ssa, *cfg.entryDef));
+    EXPECT_EQ(aPhi->incoming[1].predecessor, cfg.D);
+
+    // Inner header merges the outer header's value with the inner latch.
+    ASSERT_EQ(bPhi->incoming.size(), 2u);
+    EXPECT_EQ(bPhi->incoming[0].value, aPhi->result);
+    EXPECT_EQ(bPhi->incoming[1].value, definedValue(ssa, *cfg.cDef));
+    EXPECT_EQ(sourceValue(ssa, *cfg.bUse, 0), bPhi->result);
+}
+
+TEST_F(LiftCfgTest, SelfLoopProducesASelfReferentialPhi) {
+    SelfLoopJoinCfg cfg = buildSelfLoopJoinCfg(*func, kArch);
+
+    const CanonicalSSA ssa = lift();
+
+    const SSAPhi* phi = phiFor(ssa, *cfg.C, 0);
+    ASSERT_NE(phi, nullptr);
+    ASSERT_EQ(phi->incoming.size(), 3u);
+
+    // The self edge carries the PHI's own result: nothing in C redefines v0.
+    bool sawSelfEdge = false;
+    for (const SSAPhiIncoming& incoming : phi->incoming) {
+        if (incoming.predecessor != cfg.C) continue;
+        sawSelfEdge = true;
+        EXPECT_EQ(incoming.value, phi->result);
+    }
+    EXPECT_TRUE(sawSelfEdge);
+    EXPECT_EQ(sourceValue(ssa, *cfg.cUse, 0), phi->result);
+    EXPECT_EQ(sourceValue(ssa, *cfg.dUse, 0), phi->result);
+}
+
+TEST_F(LiftCfgTest, IrreducibleCfgProducesMutuallyReferentialPhis) {
+    IrreducibleCfg cfg = buildIrreducibleCfg(*func, kArch);
+
+    const CanonicalSSA ssa = lift();
+
+    const SSAPhi* cPhi = phiFor(ssa, *cfg.C, 0);
+    const SSAPhi* dPhi = phiFor(ssa, *cfg.D, 0);
+    const SSAPhi* ePhi = phiFor(ssa, *cfg.E, 0);
+    ASSERT_NE(cPhi, nullptr);
+    ASSERT_NE(dPhi, nullptr);
+    ASSERT_NE(ePhi, nullptr);
+
+    // C and D feed each other around the irreducible cycle.
+    EXPECT_EQ(cPhi->incoming[0].value, definedValue(ssa, *cfg.aDef));
+    EXPECT_EQ(cPhi->incoming[1].value, dPhi->result);
+    EXPECT_EQ(dPhi->incoming[0].value, definedValue(ssa, *cfg.bDef));
+    EXPECT_EQ(dPhi->incoming[1].value, cPhi->result);
+    EXPECT_EQ(sourceValue(ssa, *cfg.eUse, 0), ePhi->result);
+}
+
+TEST_F(LiftCfgTest, MultipleRegistersMergeAtOneJoin) {
+    MultiRegJoinCfg cfg = buildMultiRegJoinCfg(*func, kArch);
+
+    const CanonicalSSA ssa = lift();
+
+    ASSERT_NE(phiFor(ssa, *cfg.C, 0), nullptr);
+    ASSERT_NE(phiFor(ssa, *cfg.C, 1), nullptr);
+    EXPECT_EQ(phiCountIn(ssa, *cfg.C), 2u);
+}
+
+TEST_F(LiftCfgTest, PartialRedefinitionOfAWideRegisterOnlyMergesThatDword) {
+    WideRegPartialRedefCfg cfg = buildWideRegPartialRedefCfg(*func, kArch);
+
+    const CanonicalSSA ssa = lift();
+
+    // Only v0 is redefined, so only v0 merges; v1 to v3 flow from the entry.
+    ASSERT_NE(phiFor(ssa, *cfg.G, 0), nullptr);
+    ASSERT_NE(phiFor(ssa, *cfg.H, 0), nullptr);
+    EXPECT_EQ(phiCountIn(ssa, *cfg.G), 1u);
+    EXPECT_EQ(phiCountIn(ssa, *cfg.H), 1u);
+
+    EXPECT_EQ(sourceValue(ssa, *cfg.gUse, 0), phiFor(ssa, *cfg.G, 0)->result);
+    // v2 still comes straight from the wide entry load.
+    EXPECT_EQ(sourceValue(ssa, *cfg.gUse, 1), definedValue(ssa, *cfg.entryWideDef, /*unit=*/2));
+    EXPECT_EQ(sourceValue(ssa, *cfg.hUse, 1), definedValue(ssa, *cfg.entryWideDef, /*unit=*/1));
+}
+
+TEST_F(LiftCfgTest, RepeatedLiftsOfACfgProduceIdenticalDumps) {
+    buildIteratedDFCfg(*func, kArch);
+
+    CanonicalSSAPrinterOptions options;
+    options.printUses = true;
+
+    const CanonicalSSA first = lift();
+    const CanonicalSSA second = lift();
+    EXPECT_EQ(canonicalSSAToString(*func, first, options),
+              canonicalSSAToString(*func, second, options));
+}
+
+TEST_F(LiftCfgTest, DuplicatePredecessorEdgesFillEverySlot) {
+    BasicBlock* entry = func->createBasicBlock("entry");
+    setFunctionArch(*func, kArch);
+    BasicBlock* left = func->createBasicBlock("left");
+    BasicBlock* join = func->createBasicBlock("join");
+    func->addEdge(entry, left);
+    func->addEdge(entry, join);
+    // The same edge twice, as a branch whose target is also the fallthrough.
+    func->addEdge(left, join);
+    func->addEdge(left, join);
+
+    createVAddInBlock(entry, kArch, 5, 20, 21);
+    StinkyInstruction* leftDef = createVAddInBlock(left, kArch, 5, 22, 23);
+    StinkyInstruction* use = createVAddInBlock(join, kArch, 6, 5, 5);
+
+    const CanonicalSSA ssa = lift();
+
+    const SSAPhi* phi = phiFor(ssa, *join, 5);
+    ASSERT_NE(phi, nullptr);
+    ASSERT_EQ(phi->incoming.size(), 3u);
+    for (const SSAPhiIncoming& incoming : phi->incoming) {
+        EXPECT_NE(incoming.value, kInvalidSSAValueID);
+        if (incoming.predecessor == left) EXPECT_EQ(incoming.value, definedValue(ssa, *leftDef));
+    }
+    EXPECT_EQ(sourceValue(ssa, *use, 0), phi->result);
+}
+
+// ---------------------------------------------------------------------------
 // Pass wrapper
 // ---------------------------------------------------------------------------
 
@@ -448,6 +744,7 @@ TEST_F(LiftAsmRegistersToSSAPassTest, RunsThroughThePassManager) {
     createVAddInBlock(entry, kArch, 2, 0, 1);
 
     PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
     pm.addPass(createLiftAsmRegistersToSSAPass());
     pm.run(*func);
 
@@ -468,7 +765,7 @@ TEST_F(LiftAsmRegistersToSSAPassTest, DoesNotRewritePhysicalOperands) {
 
 TEST_F(LiftAsmRegistersToSSAPassTest, UnsupportedFunctionIsLeftWithoutSSA) {
     createVAddInBlock(entry, kArch, 2, 0, 1);
-    func->createBasicBlock("second");
+    func->createBasicBlock("orphan");
 
     runPass();
 
@@ -482,7 +779,7 @@ TEST_F(LiftAsmRegistersToSSAPassTest, FailureDetachesAStaleGraph) {
 
     // Make the function unsupported, then run again: keeping the old graph
     // would leave SSA that no longer describes the function.
-    func->createBasicBlock("second");
+    func->createBasicBlock("orphan");
     runPass();
 
     EXPECT_FALSE(func->hasCanonicalSSA());
@@ -531,7 +828,7 @@ TEST_F(LiftAsmRegistersToSSAPassTest, ForwardsOptionsToTheLifter) {
 
 TEST_F(LiftAsmRegistersToSSAPassTest, ReportsWhyAFunctionWasNotLifted) {
     createVAddInBlock(entry, kArch, 2, 0, 1);
-    func->createBasicBlock("second");
+    func->createBasicBlock("orphan");
     passCtx.setRemarksEnabled(true);
 
     std::ostringstream captured;
@@ -541,7 +838,7 @@ TEST_F(LiftAsmRegistersToSSAPassTest, ReportsWhyAFunctionWasNotLifted) {
 
     const std::string text = captured.str();
     EXPECT_TRUE(contains(text, "missed: LiftAsmRegistersToSSA")) << text;
-    EXPECT_TRUE(contains(text, "requires a single basic block")) << text;
+    EXPECT_TRUE(contains(text, "^orphan is unreachable from the entry")) << text;
 }
 
 TEST_F(LiftAsmRegistersToSSAPassTest, ReportsWhatWasLifted) {

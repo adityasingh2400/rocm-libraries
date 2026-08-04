@@ -35,6 +35,7 @@ namespace stinkytofu {
 
 class BasicBlock;
 class Function;
+struct DominanceInfo;
 struct StinkyInstruction;
 
 using SSAValueID = uint32_t;
@@ -194,10 +195,15 @@ struct STINKYTOFU_EXPORT CanonicalSSAVerificationResult {
 /// agreement with the physical operands, PHI predecessor coverage and
 /// ordering, and same-block definition-before-use ordering.
 ///
-/// Cross-block dominance requires dominance info and is checked separately by
-/// the lifting pass.
+/// Cross-block dominance needs dominance info; pass it to check that too.
 STINKYTOFU_EXPORT CanonicalSSAVerificationResult verifyCanonicalSSA(const Function& function,
                                                                     const CanonicalSSA& ssa);
+
+/// As above, and additionally checks that every definition dominates its uses
+/// and that every PHI input dominates the end of its predecessor block.
+STINKYTOFU_EXPORT CanonicalSSAVerificationResult verifyCanonicalSSA(const Function& function,
+                                                                    const CanonicalSSA& ssa,
+                                                                    const DominanceInfo& dominance);
 
 /// Verify the sidecar attached to \p function. Reports an error when none is.
 STINKYTOFU_EXPORT CanonicalSSAVerificationResult verifyCanonicalSSA(const Function& function);

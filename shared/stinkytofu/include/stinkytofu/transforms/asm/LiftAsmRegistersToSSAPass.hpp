@@ -31,6 +31,7 @@
 namespace stinkytofu {
 class Function;
 class Pass;
+struct DominanceInfo;
 
 struct LiftAsmRegistersToSSAOptions {
     /// Verify the constructed graph before handing it back.
@@ -51,17 +52,26 @@ struct LiftAsmRegistersToSSAOptions {
 /// definition of a register unit becomes its own SSA value, and each value
 /// keeps its originating RegKey for legacy replay.
 ///
-/// Current scope is deliberately narrow. Supported input is a single basic
-/// block with no incoming edges and full-DWORD VGPR operands. Literals,
-/// special registers such as EXEC or SCC, and pseudo registers are ignored
-/// rather than lifted. Anything else - other register classes, unresolved
-/// template virtual registers, True16 halves, calls, or leftover analysis
-/// PHIs - is reported as an error instead of being silently mishandled.
+/// Values that merge at a control-flow join become canonical PHIs in the
+/// sidecar, placed at iterated dominance frontiers and pruned by liveness so
+/// no dead PHI is created. Reducible and irreducible CFGs are both supported.
+///
+/// Current scope is deliberately narrow. Operands must be full-DWORD VGPRs,
+/// and every block must be reachable from the entry. Literals, special
+/// registers such as EXEC or SCC, and pseudo registers are ignored rather than
+/// lifted. Anything else - other register classes, unresolved template virtual
+/// registers, True16 halves, calls, or leftover analysis PHIs - is reported as
+/// an error instead of being silently mishandled.
 ///
 /// Construction is atomic: on error nothing is returned, so a caller can never
 /// attach a partially built graph.
 STINKYTOFU_EXPORT Expected<CanonicalSSA> liftAsmRegistersToSSA(
-    const Function& function, const LiftAsmRegistersToSSAOptions& options = {});
+    Function& function, const LiftAsmRegistersToSSAOptions& options = {});
+
+/// As above, reusing dominance information the caller already computed.
+STINKYTOFU_EXPORT Expected<CanonicalSSA> liftAsmRegistersToSSA(
+    Function& function, const DominanceInfo& dominance,
+    const LiftAsmRegistersToSSAOptions& options = {});
 
 /// Creates a pass that lifts a function's physical registers to canonical SSA
 /// and attaches the result to the function.

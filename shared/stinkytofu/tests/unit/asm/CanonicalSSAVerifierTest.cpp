@@ -28,6 +28,7 @@
 
 #include "CanonicalSSATestUtils.hpp"
 #include "TestHelpers.hpp"
+#include "stinkytofu/analysis/controlflow/Dominance.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/CanonicalSSA.hpp"
@@ -167,6 +168,84 @@ TEST_F(CanonicalSSAVerifierTest, RejectsUseBeforeDefinitionInSameBlock) {
     const CanonicalSSAVerificationResult result = verify();
     EXPECT_FALSE(result.ok());
     EXPECT_TRUE(hasError(result, "used earlier or at the same position")) << result.toString();
+}
+
+TEST_F(CanonicalSSAVerifierTest, RejectsUseNotDominatedByItsDefinition) {
+    BasicBlock* left = func->createBasicBlock("left");
+    BasicBlock* right = func->createBasicBlock("right");
+    func->addEdge(entry, left);
+    func->addEdge(entry, right);
+
+    // Defined on one arm of a branch, used on the other.
+    StinkyInstruction* def = createVAddInBlock(left, kArch, 5, 20, 21);
+    StinkyInstruction* use = createVAddInBlock(right, kArch, 6, 5, 5);
+    const SSAValueID in20 = addLiveIn(builder, 20);
+    const SSAValueID in21 = addLiveIn(builder, 21);
+    const SSAValueID defined = bindInstruction(builder, *def, {{in20}, {in21}}).front();
+    bindInstruction(builder, *use, {{defined}, {defined}});
+
+    ssa = builder.take();
+    // Without dominance info only same-block ordering is checked.
+    EXPECT_TRUE(verifyCanonicalSSA(*func, ssa).ok());
+
+    const DominanceInfo dominance = computeDominanceInfo(*func);
+    const CanonicalSSAVerificationResult result = verifyCanonicalSSA(*func, ssa, dominance);
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(hasError(result, "^left, which does not dominate ^right")) << result.toString();
+}
+
+TEST_F(CanonicalSSAVerifierTest, RejectsPhiInputThatDoesNotDominateItsEdge) {
+    BasicBlock* left = func->createBasicBlock("left");
+    BasicBlock* right = func->createBasicBlock("right");
+    BasicBlock* join = func->createBasicBlock("join");
+    func->addEdge(entry, left);
+    func->addEdge(entry, right);
+    func->addEdge(left, join);
+    func->addEdge(right, join);
+
+    StinkyInstruction* leftDef = createVAddInBlock(left, kArch, 5, 20, 21);
+    StinkyInstruction* rightDef = createVAddInBlock(right, kArch, 5, 22, 23);
+    const SSAValueID in20 = addLiveIn(builder, 20);
+    const SSAValueID in21 = addLiveIn(builder, 21);
+    const SSAValueID in22 = addLiveIn(builder, 22);
+    const SSAValueID in23 = addLiveIn(builder, 23);
+    const SSAValueID leftValue = bindInstruction(builder, *leftDef, {{in20}, {in21}}).front();
+    const SSAValueID rightValue = bindInstruction(builder, *rightDef, {{in22}, {in23}}).front();
+
+    // Swap the arms: each edge carries the value defined on the other side.
+    addPhi(builder, *join, vgprKey(5), {rightValue, leftValue});
+
+    ssa = builder.take();
+    const DominanceInfo dominance = computeDominanceInfo(*func);
+    const CanonicalSSAVerificationResult result = verifyCanonicalSSA(*func, ssa, dominance);
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(hasError(result, "does not dominate predecessor ^left")) << result.toString();
+    EXPECT_TRUE(hasError(result, "does not dominate predecessor ^right")) << result.toString();
+}
+
+TEST_F(CanonicalSSAVerifierTest, AcceptsPhiInputsThatDominateTheirEdges) {
+    BasicBlock* left = func->createBasicBlock("left");
+    BasicBlock* right = func->createBasicBlock("right");
+    BasicBlock* join = func->createBasicBlock("join");
+    func->addEdge(entry, left);
+    func->addEdge(entry, right);
+    func->addEdge(left, join);
+    func->addEdge(right, join);
+
+    StinkyInstruction* leftDef = createVAddInBlock(left, kArch, 5, 20, 21);
+    StinkyInstruction* rightDef = createVAddInBlock(right, kArch, 5, 22, 23);
+    const SSAValueID in20 = addLiveIn(builder, 20);
+    const SSAValueID in21 = addLiveIn(builder, 21);
+    const SSAValueID in22 = addLiveIn(builder, 22);
+    const SSAValueID in23 = addLiveIn(builder, 23);
+    const SSAValueID leftValue = bindInstruction(builder, *leftDef, {{in20}, {in21}}).front();
+    const SSAValueID rightValue = bindInstruction(builder, *rightDef, {{in22}, {in23}}).front();
+    addPhi(builder, *join, vgprKey(5), {leftValue, rightValue});
+
+    ssa = builder.take();
+    const DominanceInfo dominance = computeDominanceInfo(*func);
+    const CanonicalSSAVerificationResult result = verifyCanonicalSSA(*func, ssa, dominance);
+    EXPECT_TRUE(result.ok()) << result.toString();
 }
 
 TEST_F(CanonicalSSAVerifierTest, RejectsTwoValuesDefiningOneSlot) {
