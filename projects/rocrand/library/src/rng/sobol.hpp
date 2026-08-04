@@ -75,7 +75,8 @@ template<unsigned int OutputPerThread,
          class Engine,
          class Constant,
          class T,
-         class Distribution>
+         class Distribution,
+         bool UseLDS = false>
 struct generate_sobol_host
 {
     template<host::target_arch Arch = host::target_arch::unknown>
@@ -98,7 +99,8 @@ template<unsigned int OutputPerThread,
          class Constant,
          class T,
          class Distribution,
-         int block_size>
+         int  block_size,
+         bool UseLDS = false>
 __global__ __launch_bounds__(block_size)
 void generate_sobol_kernel(T*                       data,
                            const size_t             n,
@@ -113,7 +115,8 @@ template<unsigned int OutputPerThread,
          class Constant,
          class T,
          class Distribution,
-         int block_size>
+         int  block_size,
+         bool UseLDS = false>
 __global__ __launch_bounds__(block_size)
 void generate_sobol_kernel(
     T*, const size_t, const Constant*, const Constant*, const unsigned long long, Distribution)
@@ -124,7 +127,8 @@ template<unsigned int OutputPerThread,
          class Engine,
          class Constant,
          class T,
-         class Distribution>
+         class Distribution,
+         bool UseLDS = false>
 struct generate_sobol_host
 {
     template<host::target_arch Arch = host::target_arch::unknown>
@@ -206,14 +210,14 @@ struct generate_sobol_host
                                                          scramble_constant,
                                                          offset + engine_offset);
 #ifdef __HIP_DEVICE_COMPILE__
-        if constexpr(is_discrete_distribution_v<Distribution>)
+        if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
             distribution.stage_to_lds(threadIdx.x, blockDim.x);
         __syncthreads();
 #endif
         while(index < n)
         {
 #ifdef __HIP_DEVICE_COMPILE__
-            if constexpr(is_discrete_distribution_v<Distribution>)
+            if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
                 data[index] = distribution.generate_lds(engine.current());
             else
 #endif
@@ -243,7 +247,7 @@ struct generate_sobol_host
             for(unsigned int o = 0; o < head_size; o++)
             {
 #ifdef __HIP_DEVICE_COMPILE__
-                if constexpr(is_discrete_distribution_v<Distribution>)
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
                     data[o] = distribution.generate_lds(engine.current());
                 else
 #endif
@@ -254,7 +258,7 @@ struct generate_sobol_host
 
         vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
 #ifdef __HIP_DEVICE_COMPILE__
-        if constexpr(is_discrete_distribution_v<Distribution>)
+        if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
             distribution.stage_to_lds(threadIdx.x, blockDim.x);
         __syncthreads();
 #endif
@@ -266,7 +270,7 @@ struct generate_sobol_host
             for(unsigned int i = 0; i < output_per_thread; i++)
             {
 #ifdef __HIP_DEVICE_COMPILE__
-                if constexpr(is_discrete_distribution_v<Distribution>)
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
                     output[i] = distribution.generate_lds(engine.current());
                 else
 #endif
@@ -288,7 +292,7 @@ struct generate_sobol_host
             for(unsigned int o = 0; o < tail_size; o++)
             {
 #ifdef __HIP_DEVICE_COMPILE__
-                if constexpr(is_discrete_distribution_v<Distribution>)
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
                     data[n - tail_size + o] = distribution.generate_lds(engine.current());
                 else
 #endif
@@ -765,23 +769,40 @@ public:
                 return ROCRAND_STATUS_INTERNAL_ERROR;
             }
 
-            status = system_type::template launch<generate_sobol_host<output_per_thread,
-                                                                      Scrambled,
-                                                                      engine_type,
-                                                                      constant_type,
-                                                                      T,
-                                                                      Distribution>,
-                                                  block_size_provider>(target_arch,
-                                                                       dim3(blocks_x, blocks_y),
-                                                                       dim3(threads),
-                                                                       shared_mem_bytes,
-                                                                       m_stream,
-                                                                       data,
-                                                                       size,
-                                                                       m_direction_vectors,
-                                                                       m_scramble_constants,
-                                                                       m_current_offset,
-                                                                       distribution);
+            bool use_lds = false;
+            if constexpr(is_discrete_distribution_v<Distribution>)
+            {
+                use_lds = distribution.check_lds_size();
+            }
+
+            const auto use_lds_variant
+                = cpp_utils::constexpr_value_variant<bool, false, true>::create(use_lds);
+
+            status = std::visit(
+                [&](auto possible_lds_usage)
+                {
+                    return system_type::template launch<generate_sobol_host<output_per_thread,
+                                                                            Scrambled,
+                                                                            engine_type,
+                                                                            constant_type,
+                                                                            T,
+                                                                            Distribution,
+                                                                            possible_lds_usage>,
+                                                        block_size_provider>(
+                        target_arch,
+                        dim3(blocks_x, blocks_y),
+                        dim3(threads),
+                        shared_mem_bytes,
+                        m_stream,
+                        data,
+                        size,
+                        m_direction_vectors,
+                        m_scramble_constants,
+                        m_current_offset,
+                        distribution);
+                },
+                use_lds_variant);
+
             if(status != ROCRAND_STATUS_SUCCESS)
             {
                 return status;

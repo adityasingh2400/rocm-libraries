@@ -88,7 +88,7 @@ struct threefry_device_engine : public BaseType
     // m_state from base class
 };
 
-template<class Engine, class T, class Distribution>
+template<class Engine, class T, class Distribution, bool UseLDS = false>
 struct generate_threefry
 {
     template<host::target_arch Arch = host::target_arch::unknown>
@@ -134,7 +134,7 @@ struct generate_threefry
         engine.discard(engine_offset);
 
 #ifdef __HIP_DEVICE_COMPILE__
-        if constexpr(is_discrete_distribution_v<Distribution>)
+        if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
             distribution.stage_to_lds(threadIdx.x, blockDim.x);
         __syncthreads();
 #endif
@@ -153,7 +153,7 @@ struct generate_threefry
                     input[i] = engine();
                 }
 #ifdef __HIP_DEVICE_COMPILE__
-                if constexpr(is_discrete_distribution_v<Distribution>)
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
                     distribution.generate_lds(input, output[s]);
                 else
 #endif
@@ -183,7 +183,7 @@ struct generate_threefry
                     input[i] = vs[s * input_width + i];
                 }
 #ifdef __HIP_DEVICE_COMPILE__
-                if constexpr(is_discrete_distribution_v<Distribution>)
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
                     distribution.generate_lds(input, output[s]);
                 else
 #endif
@@ -211,7 +211,7 @@ struct generate_threefry
                     input[i] = engine();
                 }
 #ifdef __HIP_DEVICE_COMPILE__
-                if constexpr(is_discrete_distribution_v<Distribution>)
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
                     distribution.generate_lds(input, output[s]);
                 else
 #endif
@@ -383,23 +383,38 @@ public:
                 return ROCRAND_STATUS_INTERNAL_ERROR;
             }
 
-            status = dynamic_dispatch(m_order,
-                                      [&, this](auto is_dynamic)
-                                      {
-                                          return system_type::template launch<
-                                              generate_threefry<engine_type, T, Distribution>,
-                                              ConfigProvider,
-                                              T,
-                                              is_dynamic>(target_arch,
-                                                          dim3(config.blocks),
-                                                          dim3(config.threads),
-                                                          0,
-                                                          m_stream,
-                                                          m_engine,
-                                                          data,
-                                                          data_size,
-                                                          distribution);
-                                      });
+            bool use_lds = false;
+            if constexpr(is_discrete_distribution_v<Distribution>)
+            {
+                use_lds = distribution.check_lds_size();
+            }
+
+            const auto use_lds_variant
+                = cpp_utils::constexpr_value_variant<bool, false, true>::create(use_lds);
+
+            status = std::visit(
+                [&](auto possible_lds_usage)
+                {
+                    return dynamic_dispatch(
+                        m_order,
+                        [&, this](auto is_dynamic)
+                        {
+                            return system_type::template launch<
+                                generate_threefry<engine_type, T, Distribution, possible_lds_usage>,
+                                ConfigProvider,
+                                T,
+                                is_dynamic>(target_arch,
+                                            dim3(config.blocks),
+                                            dim3(config.threads),
+                                            0,
+                                            m_stream,
+                                            m_engine,
+                                            data,
+                                            data_size,
+                                            distribution);
+                        });
+                },
+                use_lds_variant);
 
             // Check kernel status
             if(status != ROCRAND_STATUS_SUCCESS)

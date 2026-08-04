@@ -69,7 +69,12 @@ __host__ __device__
     }
 };
 
-template<class ConfigProvider, bool IsDynamic, class T, class Distribution, bool PossibleMissAlign>
+template<class ConfigProvider,
+         bool IsDynamic,
+         class T,
+         class Distribution,
+         bool PossibleMissAlign,
+         bool UseLDS>
 struct generate_xorwow
 {
     template<host::target_arch Arch = host::target_arch::unknown>
@@ -109,7 +114,7 @@ __host__ __device__ __forceinline__
 
         size_t index = thread_id;
 #ifdef __HIP_DEVICE_COMPILE__
-        if constexpr(is_discrete_distribution_v<Distribution>)
+        if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
             distribution.stage_to_lds(threadIdx.x, blockDim.x);
         __syncthreads();
 #endif
@@ -127,7 +132,7 @@ __host__ __device__ __forceinline__
                 input[i] = engine();
             }
 #ifdef __HIP_DEVICE_COMPILE__
-            if constexpr(is_discrete_distribution_v<Distribution>)
+            if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
                 distribution.generate_lds(input, output);
             else
 #endif
@@ -156,7 +161,7 @@ __host__ __device__ __forceinline__
                     input[i] = engine();
                 }
 #ifdef __HIP_DEVICE_COMPILE__
-                if constexpr(is_discrete_distribution_v<Distribution>)
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
                     distribution.generate_lds(input, output);
                 else
 #endif
@@ -178,7 +183,7 @@ __host__ __device__ __forceinline__
                     input[i] = engine();
                 }
 #ifdef __HIP_DEVICE_COMPILE__
-                if constexpr(is_discrete_distribution_v<Distribution>)
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
                     distribution.generate_lds(input, output);
                 else
 #endif
@@ -420,8 +425,17 @@ public:
         const auto use_missaligned_variant
             = cpp_utils::constexpr_value_variant<bool, false, true>::create(possible_miss_align);
 
+        bool use_lds = false;
+        if constexpr(is_discrete_distribution_v<Distribution>)
+        {
+            use_lds = distribution.check_lds_size();
+        }
+
+        const auto use_lds_variant
+            = cpp_utils::constexpr_value_variant<bool, false, true>::create(use_lds);
+
         status = std::visit(
-            [&](auto possibly_miss_aligned)
+            [&](auto possibly_miss_aligned, auto possible_lds_usage)
             {
                 return dynamic_dispatch(
                     m_order,
@@ -431,7 +445,8 @@ public:
                                                                             is_dynamic,
                                                                             T,
                                                                             Distribution,
-                                                                            possibly_miss_aligned>,
+                                                                            possibly_miss_aligned,
+                                                                            possible_lds_usage>,
                                                             ConfigProvider,
                                                             T,
                                                             is_dynamic>(target_arch,
@@ -449,7 +464,8 @@ public:
                                                                         misalignment);
                     });
             },
-            use_missaligned_variant);
+            use_missaligned_variant,
+            use_lds_variant);
 
         // Check kernel status
         if(status != ROCRAND_STATUS_SUCCESS)

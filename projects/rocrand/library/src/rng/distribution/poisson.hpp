@@ -89,6 +89,13 @@ public:
         output[0] = generate_lds(input[0]);
     }
 
+    __forceinline__
+    __host__ __device__
+    bool check_lds_size()
+    {
+        return base_t::check_lds_size();
+    }
+
     __device__
     void stage_to_lds(unsigned int tid, unsigned int block_size)
     {

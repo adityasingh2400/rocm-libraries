@@ -128,13 +128,20 @@ public:
         return &s_dist;
     }
 
+    __forceinline__
+    __host__ __device__
+    bool check_lds_size()
+    {
+        return m_distribution.size <= LDS_DISTR_MAX;
+    }
+
     __device__
     void stage_to_lds(unsigned int tid, unsigned int block_size)
     {
         rocrand_discrete_distribution s_dist = get_storage();
 
         const unsigned int dist_size = m_distribution.size;
-        if(dist_size > LDS_DISTR_MAX) // TODO How to do fallback without performance loss, done on host?
+        if(dist_size > LDS_DISTR_MAX) // Should never be reached
             return;
 
         if(tid == 0)
@@ -176,8 +183,9 @@ constexpr bool is_discrete_distribution_v
                         Distribution>
       || std::is_base_of_v<discrete_distribution_base<discrete_method::DISCRETE_METHOD_CDF>,
                            Distribution>
-      || std::is_base_of_v<discrete_distribution_base<discrete_method::DISCRETE_METHOD_UNIVERSAL>,
-                           Distribution>;
+      || std::is_base_of_v<
+          discrete_distribution_base<discrete_method::DISCRETE_METHOD_UNIVERSAL>,
+          Distribution>; // TODO: I want to do this for all distributions that inherite discrete or only poisson?
 
 /// \brief A collection of static methods for constructing and destroying
 /// instances of `rocrand_discrete_distribution_st`.
