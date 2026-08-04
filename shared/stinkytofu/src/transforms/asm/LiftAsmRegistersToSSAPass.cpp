@@ -40,6 +40,7 @@
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/support/OptimizationRemark.hpp"
+#include "stinkytofu/transforms/asm/TransientRegisterAnalysisCleanup.hpp"
 
 #define DEBUG_TYPE "LiftAsmRegistersToSSAPass"
 
@@ -612,6 +613,12 @@ class LiftAsmRegistersToSSAPassImpl : public Pass {
             return preserveCFGAnalyses();
         }
 
+        // Physical-register analyses cannot describe SSA values, so they are
+        // discarded at the boundary rather than left for a consumer to trust.
+        // This removes instructions but leaves blocks and edges alone, so CFG
+        // analyses stay valid.
+        const TransientAnalysisCleanup cleanup = clearTransientRegisterAnalyses(func);
+
         const DominanceInfo& dominance = AM.getResult<DominanceAnalysis>(func);
         Expected<CanonicalSSA> lifted = liftAsmRegistersToSSA(func, dominance, options_);
         if (lifted.hasError()) {
@@ -624,9 +631,11 @@ class LiftAsmRegistersToSSAPassImpl : public Pass {
         const size_t phis = lifted->phiCount();
         func.setCanonicalSSA(std::make_unique<CanonicalSSA>(std::move(*lifted)));
 
-        emitRemark(passCtx, {OptimizationRemark::Kind::Passed, kPassName, "LiftedToSSA",
-                             "@" + func.getName() + ": lifted " + std::to_string(values) +
-                                 " SSA value(s) and " + std::to_string(phis) + " phi(s)"});
+        emitRemark(passCtx,
+                   {OptimizationRemark::Kind::Passed, kPassName, "LiftedToSSA",
+                    "@" + func.getName() + ": lifted " + std::to_string(values) +
+                        " SSA value(s) and " + std::to_string(phis) + " phi(s), after removing " +
+                        std::to_string(cleanup.removedPhis) + " analysis phi(s)"});
         return preserveCFGAnalyses();
     }
 

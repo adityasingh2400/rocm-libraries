@@ -63,6 +63,12 @@ struct LiftAsmRegistersToSSAOptions {
 /// registers, True16 halves, calls, or leftover analysis PHIs - is reported as
 /// an error instead of being silently mishandled.
 ///
+/// The function must already be free of transient physical-register analysis
+/// state; a leftover `GFX::PHI` is an error rather than something to clean up,
+/// because construction reads the function without modifying it. Callers that
+/// need the cleanup done for them should use the pass, or call
+/// clearTransientRegisterAnalyses() first.
+///
 /// Construction is atomic: on error nothing is returned, so a caller can never
 /// attach a partially built graph.
 STINKYTOFU_EXPORT Expected<CanonicalSSA> liftAsmRegistersToSSA(
@@ -79,12 +85,15 @@ STINKYTOFU_EXPORT Expected<CanonicalSSA> liftAsmRegistersToSSA(
 /// The pass is function-wide: PHI placement and renaming need every block, so
 /// it refuses to run at all when basic-block filtering excludes any block.
 ///
-/// It never mutates blocks, instructions, or register operands. Any previously
-/// attached sidecar is detached first, so an unsupported function is left with
-/// no canonical SSA rather than a graph describing an earlier state. Consumers
-/// must therefore check Function::hasCanonicalSSA() and fall back when it is
-/// absent; unsupported input is reported as a missed-optimization remark, not
-/// a hard error.
+/// Before lifting it discards transient physical-register analysis state, which
+/// removes analysis PHI pseudo-instructions and def-use edges. Blocks, edges,
+/// and register operands are left untouched, so CFG analyses stay valid.
+///
+/// Any previously attached sidecar is detached first, so an unsupported function
+/// is left with no canonical SSA rather than a graph describing an earlier
+/// state. Consumers must therefore check Function::hasCanonicalSSA() and fall
+/// back when it is absent; unsupported input is reported as a
+/// missed-optimization remark, not a hard error.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createLiftAsmRegistersToSSAPass(
     const LiftAsmRegistersToSSAOptions& options = {});
 

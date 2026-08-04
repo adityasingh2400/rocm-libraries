@@ -39,6 +39,7 @@
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/serialization/asm/CanonicalSSAPrinter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+#include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/LiftAsmRegistersToSSAPass.hpp"
 
 using namespace stinkytofu;
@@ -393,6 +394,166 @@ TEST_F(LiftAsmRegistersToSSATest, FailureLeavesNoGraphBehind) {
     Expected<CanonicalSSA> result = liftAsmRegistersToSSA(*func);
     ASSERT_TRUE(result.hasError());
     EXPECT_FALSE(func->hasCanonicalSSA());
+}
+
+// ---------------------------------------------------------------------------
+// Register ranges
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Ordered SSA units bound to a source operand.
+std::vector<SSAValueID> sourceUnits(const CanonicalSSA& ssa, const StinkyInstruction& instruction,
+                                    size_t operand) {
+    const SSAInstructionInfo* info = ssa.findInstructionInfo(instruction);
+    if (info == nullptr || operand >= info->sources.size()) return {};
+    return info->sources[operand].units;
+}
+
+std::vector<SSAValueID> destUnits(const CanonicalSSA& ssa, const StinkyInstruction& instruction,
+                                  size_t operand) {
+    const SSAInstructionInfo* info = ssa.findInstructionInfo(instruction);
+    if (info == nullptr || operand >= info->destinations.size()) return {};
+    return info->destinations[operand].units;
+}
+
+/// Physical origins of the units bound to \p units, for grouping checks.
+std::vector<unsigned> originsOf(const CanonicalSSA& ssa, const std::vector<SSAValueID>& units) {
+    std::vector<unsigned> origins;
+    origins.reserve(units.size());
+    for (SSAValueID id : units) origins.push_back(ssa.value(id).origin.idx);
+    return origins;
+}
+
+}  // namespace
+
+TEST_F(LiftAsmRegistersToSSATest, RangeUnitsKeepOperandOrderAndConsecutiveOrigins) {
+    StinkyInstruction* load = createDsReadB128InBlock(entry, kArch, /*dest=*/8, /*addr=*/0);
+
+    const CanonicalSSA ssa = lift();
+    const std::vector<SSAValueID> units = destUnits(ssa, *load, 0);
+
+    ASSERT_EQ(units.size(), 4u);
+    EXPECT_EQ(originsOf(ssa, units), (std::vector<unsigned>{8, 9, 10, 11}));
+    for (size_t unit = 0; unit < units.size(); ++unit)
+        EXPECT_EQ(ssa.value(units[unit]).definingUnit, unit);
+}
+
+TEST_F(LiftAsmRegistersToSSATest, OverlappingSourceRangesShareTheOverlappingUnits) {
+    createDsReadB128InBlock(entry, kArch, /*dest=*/4, /*addr=*/0);
+
+    // src0 = v[4:5], src1 = v[5:6]: v5 is read through both operands.
+    AsmIRBuilder builder(*entry, kArch);
+    StinkyInstruction* store = builder.create(getMCIDByUOp(GFX::ds_store_b64, kArch));
+    store->addSrcReg(StinkyRegister("v", 4, 2));
+    store->addSrcReg(StinkyRegister("v", 5, 2));
+
+    const CanonicalSSA ssa = lift();
+    const std::vector<SSAValueID> first = sourceUnits(ssa, *store, 0);
+    const std::vector<SSAValueID> second = sourceUnits(ssa, *store, 1);
+
+    ASSERT_EQ(first.size(), 2u);
+    ASSERT_EQ(second.size(), 2u);
+    EXPECT_EQ(originsOf(ssa, first), (std::vector<unsigned>{4, 5}));
+    EXPECT_EQ(originsOf(ssa, second), (std::vector<unsigned>{5, 6}));
+    // One value per physical unit, so the shared v5 appears in both operands.
+    EXPECT_EQ(first[1], second[0]);
+    EXPECT_EQ(ssa.value(first[1]).uses.size(), 2u);
+}
+
+TEST_F(LiftAsmRegistersToSSATest, DisjointRangesStayIndependent) {
+    createDsReadB128InBlock(entry, kArch, /*dest=*/4, /*addr=*/0);
+    createDsReadB128InBlock(entry, kArch, /*dest=*/8, /*addr=*/0);
+
+    AsmIRBuilder builder(*entry, kArch);
+    StinkyInstruction* store = builder.create(getMCIDByUOp(GFX::ds_store_b64, kArch));
+    store->addSrcReg(StinkyRegister("v", 4, 2));
+    store->addSrcReg(StinkyRegister("v", 8, 2));
+
+    const CanonicalSSA ssa = lift();
+
+    EXPECT_EQ(originsOf(ssa, sourceUnits(ssa, *store, 0)), (std::vector<unsigned>{4, 5}));
+    EXPECT_EQ(originsOf(ssa, sourceUnits(ssa, *store, 1)), (std::vector<unsigned>{8, 9}));
+}
+
+TEST_F(LiftAsmRegistersToSSATest, PartialRedefinitionOfARangeOnlyReplacesThoseUnits) {
+    StinkyInstruction* wide = createDsReadB128InBlock(entry, kArch, /*dest=*/4, /*addr=*/0);
+    // Overwrite only v4.
+    StinkyInstruction* narrow = createVAddInBlock(entry, kArch, /*dest=*/4, /*src0=*/20, 21);
+
+    AsmIRBuilder builder(*entry, kArch);
+    StinkyInstruction* consumer = builder.create(getMCIDByUOp(GFX::ds_store_b64, kArch));
+    consumer->addSrcReg(StinkyRegister("v", 0, 1));
+    consumer->addSrcReg(StinkyRegister("v", 4, 4));
+
+    const CanonicalSSA ssa = lift();
+    const std::vector<SSAValueID> wideUnits = destUnits(ssa, *wide, 0);
+    const std::vector<SSAValueID> consumed = sourceUnits(ssa, *consumer, 1);
+
+    ASSERT_EQ(consumed.size(), 4u);
+    // v4 comes from the narrow redefinition; v5 to v7 still come from the load.
+    EXPECT_EQ(consumed[0], destUnits(ssa, *narrow, 0).front());
+    EXPECT_NE(consumed[0], wideUnits[0]);
+    EXPECT_EQ(consumed[1], wideUnits[1]);
+    EXPECT_EQ(consumed[2], wideUnits[2]);
+    EXPECT_EQ(consumed[3], wideUnits[3]);
+}
+
+TEST_F(LiftAsmRegistersToSSATest, WideReadModifyWriteAccumulatorChainsThroughValues) {
+    // v[0:7] = wmma(v[8:15], v[16:23], v[0:7]) twice: the accumulator is read
+    // and written by each instruction, so the chain must thread through values.
+    AsmIRBuilder builder(*entry, kArch);
+    std::vector<StinkyInstruction*> wmmas;
+    for (int i = 0; i < 2; ++i) {
+        StinkyInstruction* wmma =
+            builder.create(getMCIDByUOp(GFX::v_wmma_f32_16x16x32_bf16, kArch));
+        wmma->addDestReg(StinkyRegister("v", 0, 8));
+        wmma->addSrcReg(StinkyRegister("v", 8, 8));
+        wmma->addSrcReg(StinkyRegister("v", 16, 8));
+        wmma->addSrcReg(StinkyRegister("v", 0, 8));
+        wmmas.push_back(wmma);
+    }
+
+    const CanonicalSSA ssa = lift();
+
+    const std::vector<SSAValueID> firstRead = sourceUnits(ssa, *wmmas[0], 2);
+    const std::vector<SSAValueID> firstDef = destUnits(ssa, *wmmas[0], 0);
+    const std::vector<SSAValueID> secondRead = sourceUnits(ssa, *wmmas[1], 2);
+    const std::vector<SSAValueID> secondDef = destUnits(ssa, *wmmas[1], 0);
+
+    ASSERT_EQ(firstRead.size(), 8u);
+    ASSERT_EQ(secondDef.size(), 8u);
+    for (size_t unit = 0; unit < 8; ++unit) {
+        // Each instruction reads the previous value and defines a new one.
+        EXPECT_EQ(ssa.value(firstRead[unit]).kind, SSAValueKind::LiveIn);
+        EXPECT_NE(firstRead[unit], firstDef[unit]);
+        EXPECT_EQ(secondRead[unit], firstDef[unit]);
+        EXPECT_NE(secondRead[unit], secondDef[unit]);
+        // The tie stays observable: read and written units share one origin.
+        EXPECT_EQ(ssa.value(firstDef[unit]).origin.idx, ssa.value(firstRead[unit]).origin.idx);
+    }
+}
+
+TEST_F(LiftAsmRegistersToSSATest, DestinationOverlappingItsOwnSourceReadsTheOldUnits) {
+    createDsReadB128InBlock(entry, kArch, /*dest=*/4, /*addr=*/0);
+
+    // v[4:5] = op(v[5:6]): v5 is both read and written.
+    AsmIRBuilder builder(*entry, kArch);
+    StinkyInstruction* shifted = builder.create(getMCIDByUOp(GFX::v_lshlrev_b64, kArch));
+    shifted->addDestReg(StinkyRegister("v", 4, 2));
+    shifted->addSrcReg(StinkyRegister("v", 5, 2));
+
+    const CanonicalSSA ssa = lift();
+    const std::vector<SSAValueID> read = sourceUnits(ssa, *shifted, 0);
+    const std::vector<SSAValueID> written = destUnits(ssa, *shifted, 0);
+
+    ASSERT_EQ(read.size(), 2u);
+    ASSERT_EQ(written.size(), 2u);
+    EXPECT_EQ(originsOf(ssa, read), (std::vector<unsigned>{5, 6}));
+    EXPECT_EQ(originsOf(ssa, written), (std::vector<unsigned>{4, 5}));
+    // The v5 that is read is the incoming value, not the one defined here.
+    EXPECT_NE(read[0], written[1]);
+    EXPECT_TRUE(verifyCanonicalSSA(*func, ssa).ok());
 }
 
 // ---------------------------------------------------------------------------
@@ -865,6 +1026,49 @@ TEST_F(LiftAsmRegistersToSSAPassTest, StaysQuietWhenRemarksAreDisabled) {
     std::cerr.rdbuf(previous);
 
     EXPECT_TRUE(captured.str().empty()) << captured.str();
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, LiftsAFunctionThatStillCarriesAnalysisState) {
+    // The lift function alone rejects leftover analysis PHIs; the pass cleans
+    // them up first, so a function fresh out of def-use analysis still lifts.
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+    createVAddInBlock(entry, kArch, 3, 2, 1);
+    buildUseDefChain(*func, /*clearExisting=*/false);
+
+    runPass();
+
+    ASSERT_TRUE(func->hasCanonicalSSA());
+    EXPECT_TRUE(verifyCanonicalSSA(*func).ok());
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, RemovesAnalysisPhisAndChainsBeforeLifting) {
+    Function cfgFunc("cfg");
+    IteratedDFCfg cfg = buildIteratedDFCfg(cfgFunc, kArch);
+    buildUseDefChain(cfgFunc, /*clearExisting=*/false);
+
+    size_t analysisPhis = 0;
+    for (const BasicBlock& bb : cfgFunc) {
+        for (const IRBase& ir : bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst != nullptr && inst->getUnifiedOpcode() == GFX::PHI) ++analysisPhis;
+        }
+    }
+    ASSERT_GT(analysisPhis, 0u);
+
+    auto pass = createLiftAsmRegistersToSSAPass();
+    pass->run(cfgFunc, passCtx, am);
+
+    ASSERT_TRUE(cfgFunc.hasCanonicalSSA());
+    // Analysis PHIs are gone from the stream, and the merges they approximated
+    // are now canonical sidecar PHIs instead.
+    for (const BasicBlock& bb : cfgFunc) {
+        for (const IRBase& ir : bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst != nullptr) EXPECT_NE(inst->getUnifiedOpcode(), GFX::PHI);
+        }
+    }
+    EXPECT_TRUE(cfg.hUse->getSources().empty());
+    EXPECT_GT(cfgFunc.getCanonicalSSA().phiCount(), 0u);
 }
 
 TEST_F(LiftAsmRegistersToSSAPassTest, PreservesCFGAnalyses) {
