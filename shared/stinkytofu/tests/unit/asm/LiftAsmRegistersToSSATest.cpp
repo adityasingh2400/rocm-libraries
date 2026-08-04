@@ -22,16 +22,21 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 
 #include "TestHelpers.hpp"
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/CanonicalSSA.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/serialization/asm/CanonicalSSAPrinter.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 #include "stinkytofu/transforms/asm/LiftAsmRegistersToSSAPass.hpp"
 
 using namespace stinkytofu;
@@ -382,4 +387,196 @@ TEST_F(LiftAsmRegistersToSSATest, FailureLeavesNoGraphBehind) {
     Expected<CanonicalSSA> result = liftAsmRegistersToSSA(*func);
     ASSERT_TRUE(result.hasError());
     EXPECT_FALSE(func->hasCanonicalSSA());
+}
+
+// ---------------------------------------------------------------------------
+// Pass wrapper
+// ---------------------------------------------------------------------------
+
+namespace {
+
+class LiftAsmRegistersToSSAPassTest : public ::testing::Test {
+   protected:
+    void SetUp() override {
+        func = std::make_unique<Function>("kernel");
+        setFunctionArch(*func, kArch);
+        entry = func->createBasicBlock("entry");
+        registerAllAnalyses(am);
+    }
+
+    void runPass(const LiftAsmRegistersToSSAOptions& options = {}) {
+        auto pass = createLiftAsmRegistersToSSAPass(options);
+        pass->run(*func, passCtx, am);
+    }
+
+    /// Physical instruction stream, used to prove the pass rewrites nothing.
+    std::string physicalIR() const {
+        std::ostringstream out;
+        AsmPrinter printer(out);
+        printer.print(*func);
+        return out.str();
+    }
+
+    std::unique_ptr<Function> func;
+    BasicBlock* entry = nullptr;
+    PassContext passCtx;
+    AnalysisManager am;
+};
+
+}  // namespace
+
+TEST_F(LiftAsmRegistersToSSAPassTest, HasNameAndStableID) {
+    auto first = createLiftAsmRegistersToSSAPass();
+    auto second = createLiftAsmRegistersToSSAPass();
+
+    ASSERT_NE(first, nullptr);
+    EXPECT_STREQ(first->getName(), "Lift Asm Registers to SSA");
+    EXPECT_EQ(first->getPassID(), second->getPassID());
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, AttachesVerifiedSSAOnSuccess) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+
+    runPass();
+
+    ASSERT_TRUE(func->hasCanonicalSSA());
+    EXPECT_EQ(func->getCanonicalSSA().valueCount(), 3u);
+    EXPECT_TRUE(verifyCanonicalSSA(*func).ok());
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, RunsThroughThePassManager) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+
+    PassManager pm;
+    pm.addPass(createLiftAsmRegistersToSSAPass());
+    pm.run(*func);
+
+    ASSERT_TRUE(func->hasCanonicalSSA());
+    EXPECT_TRUE(verifyCanonicalSSA(*func).ok());
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, DoesNotRewritePhysicalOperands) {
+    createDsReadB128InBlock(entry, kArch, 4, 0);
+    createVAddInBlock(entry, kArch, 8, 4, 5);
+    const std::string before = physicalIR();
+
+    runPass();
+
+    ASSERT_TRUE(func->hasCanonicalSSA());
+    EXPECT_EQ(physicalIR(), before);
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, UnsupportedFunctionIsLeftWithoutSSA) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+    func->createBasicBlock("second");
+
+    runPass();
+
+    EXPECT_FALSE(func->hasCanonicalSSA());
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, FailureDetachesAStaleGraph) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+    runPass();
+    ASSERT_TRUE(func->hasCanonicalSSA());
+
+    // Make the function unsupported, then run again: keeping the old graph
+    // would leave SSA that no longer describes the function.
+    func->createBasicBlock("second");
+    runPass();
+
+    EXPECT_FALSE(func->hasCanonicalSSA());
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, RerunRebuildsAnEquivalentGraph) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+    createVAddInBlock(entry, kArch, 3, 2, 0);
+
+    runPass();
+    ASSERT_TRUE(func->hasCanonicalSSA());
+    const std::string first = canonicalSSAToString(*func);
+
+    runPass();
+    ASSERT_TRUE(func->hasCanonicalSSA());
+    EXPECT_EQ(canonicalSSAToString(*func), first);
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, RefusesToRunWhenBlockFilteringExcludesABlock) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+    passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::byLabels({"somewhere_else"}));
+
+    runPass();
+
+    EXPECT_FALSE(func->hasCanonicalSSA());
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, RunsWhenBlockFilteringIncludesEveryBlock) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+    passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::byLabels({"entry"}));
+
+    runPass();
+
+    EXPECT_TRUE(func->hasCanonicalSSA());
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, ForwardsOptionsToTheLifter) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+
+    LiftAsmRegistersToSSAOptions options;
+    options.allowInferredLiveIns = false;
+    runPass(options);
+
+    EXPECT_FALSE(func->hasCanonicalSSA());
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, ReportsWhyAFunctionWasNotLifted) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+    func->createBasicBlock("second");
+    passCtx.setRemarksEnabled(true);
+
+    std::ostringstream captured;
+    std::streambuf* previous = std::cerr.rdbuf(captured.rdbuf());
+    runPass();
+    std::cerr.rdbuf(previous);
+
+    const std::string text = captured.str();
+    EXPECT_TRUE(contains(text, "missed: LiftAsmRegistersToSSA")) << text;
+    EXPECT_TRUE(contains(text, "requires a single basic block")) << text;
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, ReportsWhatWasLifted) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+    passCtx.setRemarksEnabled(true);
+
+    std::ostringstream captured;
+    std::streambuf* previous = std::cerr.rdbuf(captured.rdbuf());
+    runPass();
+    std::cerr.rdbuf(previous);
+
+    const std::string text = captured.str();
+    EXPECT_TRUE(contains(text, "remark: LiftAsmRegistersToSSA")) << text;
+    EXPECT_TRUE(contains(text, "@kernel: lifted 3 SSA value(s) and 0 phi(s)")) << text;
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, StaysQuietWhenRemarksAreDisabled) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+    func->createBasicBlock("second");
+
+    std::ostringstream captured;
+    std::streambuf* previous = std::cerr.rdbuf(captured.rdbuf());
+    runPass();
+    std::cerr.rdbuf(previous);
+
+    EXPECT_TRUE(captured.str().empty()) << captured.str();
+}
+
+TEST_F(LiftAsmRegistersToSSAPassTest, PreservesCFGAnalyses) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+
+    auto pass = createLiftAsmRegistersToSSAPass();
+    const PreservedAnalyses preserved = pass->run(*func, passCtx, am);
+
+    EXPECT_TRUE(preserved.isPreserved<DominanceAnalysis>());
+    EXPECT_TRUE(preserved.isPreserved<BBIndexAnalysis>());
+    EXPECT_TRUE(preserved.isPreserved<LoopAnalysis>());
 }

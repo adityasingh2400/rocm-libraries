@@ -22,18 +22,26 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/LiftAsmRegistersToSSAPass.hpp"
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/support/OptimizationRemark.hpp"
+
+#define DEBUG_TYPE "LiftAsmRegistersToSSAPass"
 
 namespace stinkytofu {
 namespace {
+
+constexpr const char* kPassName = "LiftAsmRegistersToSSA";
 
 /// How one physical operand participates in allocator SSA.
 enum class OperandKind {
@@ -235,11 +243,76 @@ Expected<CanonicalSSA> Lifter::run() {
     return ssa;
 }
 
+class LiftAsmRegistersToSSAPassImpl : public Pass {
+   public:
+    static char ID;
+
+    explicit LiftAsmRegistersToSSAPassImpl(const LiftAsmRegistersToSSAOptions& options)
+        : options_(options) {}
+
+    const char* getName() const override {
+        return "Lift Asm Registers to SSA";
+    }
+
+    PassID getPassID() const override {
+        return &LiftAsmRegistersToSSAPassImpl::ID;
+    }
+
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
+        // Drop any earlier sidecar first: if lifting fails, the function must
+        // not keep a graph that describes a previous version of the IR.
+        func.clearCanonicalSSA();
+
+        if (const BasicBlock* excluded = findExcludedBlock(func, passCtx)) {
+            missed(passCtx, "basic-block filtering excludes ^" + excluded->getLabel() +
+                                "; canonical SSA needs the whole function");
+            return preserveCFGAnalyses();
+        }
+
+        Expected<CanonicalSSA> lifted = liftAsmRegistersToSSA(func, options_);
+        if (lifted.hasError()) {
+            PASS_DEBUG(std::cerr << "LiftAsmRegistersToSSA: " << lifted.getError() << "\n");
+            missed(passCtx, lifted.getError());
+            return preserveCFGAnalyses();
+        }
+
+        const size_t values = lifted->valueCount();
+        const size_t phis = lifted->phiCount();
+        func.setCanonicalSSA(std::make_unique<CanonicalSSA>(std::move(*lifted)));
+
+        emitRemark(passCtx, {OptimizationRemark::Kind::Passed, kPassName, "LiftedToSSA",
+                             "@" + func.getName() + ": lifted " + std::to_string(values) +
+                                 " SSA value(s) and " + std::to_string(phis) + " phi(s)"});
+        return preserveCFGAnalyses();
+    }
+
+   private:
+    /// First block the pipeline asked us to skip, or null when all are in scope.
+    static const BasicBlock* findExcludedBlock(const Function& func, const PassContext& passCtx) {
+        for (const BasicBlock& bb : func) {
+            if (!passCtx.shouldProcessBasicBlock(bb)) return &bb;
+        }
+        return nullptr;
+    }
+
+    static void missed(const PassContext& passCtx, const std::string& message) {
+        emitRemark(passCtx, {OptimizationRemark::Kind::Missed, kPassName, "NotLifted", message});
+    }
+
+    LiftAsmRegistersToSSAOptions options_;
+};
+
+char LiftAsmRegistersToSSAPassImpl::ID = 0;
+
 }  // namespace
 
 Expected<CanonicalSSA> liftAsmRegistersToSSA(const Function& function,
                                              const LiftAsmRegistersToSSAOptions& options) {
     return Lifter(function, options).run();
+}
+
+std::unique_ptr<Pass> createLiftAsmRegistersToSSAPass(const LiftAsmRegistersToSSAOptions& options) {
+    return std::make_unique<LiftAsmRegistersToSSAPassImpl>(options);
 }
 
 }  // namespace stinkytofu

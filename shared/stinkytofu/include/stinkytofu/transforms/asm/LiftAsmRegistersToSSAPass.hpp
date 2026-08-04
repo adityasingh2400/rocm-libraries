@@ -22,12 +22,15 @@
  * ************************************************************************ */
 #pragma once
 
+#include <memory>
+
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/ir/asm/CanonicalSSA.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace stinkytofu {
 class Function;
+class Pass;
 
 struct LiftAsmRegistersToSSAOptions {
     /// Verify the constructed graph before handing it back.
@@ -59,5 +62,20 @@ struct LiftAsmRegistersToSSAOptions {
 /// attach a partially built graph.
 STINKYTOFU_EXPORT Expected<CanonicalSSA> liftAsmRegistersToSSA(
     const Function& function, const LiftAsmRegistersToSSAOptions& options = {});
+
+/// Creates a pass that lifts a function's physical registers to canonical SSA
+/// and attaches the result to the function.
+///
+/// The pass is function-wide: PHI placement and renaming need every block, so
+/// it refuses to run at all when basic-block filtering excludes any block.
+///
+/// It never mutates blocks, instructions, or register operands. Any previously
+/// attached sidecar is detached first, so an unsupported function is left with
+/// no canonical SSA rather than a graph describing an earlier state. Consumers
+/// must therefore check Function::hasCanonicalSSA() and fall back when it is
+/// absent; unsupported input is reported as a missed-optimization remark, not
+/// a hard error.
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createLiftAsmRegistersToSSAPass(
+    const LiftAsmRegistersToSSAOptions& options = {});
 
 }  // namespace stinkytofu
