@@ -19,12 +19,42 @@
  * ************************************************************************ */
 #include "stinkytofu/core/Function.hpp"
 
+#include <cassert>
 #include <iostream>
 #include <ostream>
+#include <utility>
 
+#include "stinkytofu/ir/asm/CanonicalSSA.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 
 namespace stinkytofu {
+Function::Function(const std::string& name) : name(name), basicBlocks(this) {}
+
+Function::~Function() = default;
+
+CanonicalSSA& Function::getCanonicalSSA() {
+    assert(canonicalSSA && "no canonical SSA attached to this function");
+    return *canonicalSSA;
+}
+
+const CanonicalSSA& Function::getCanonicalSSA() const {
+    assert(canonicalSSA && "no canonical SSA attached to this function");
+    return *canonicalSSA;
+}
+
+void Function::setCanonicalSSA(std::unique_ptr<CanonicalSSA> ssa) {
+    canonicalSSA = std::move(ssa);
+}
+
+void Function::clearCanonicalSSA() {
+    canonicalSSA.reset();
+}
+
+void Function::clear() {
+    clearCanonicalSSA();
+    basicBlocks.clear();
+}
+
 void Function::dump(std::ostream& out) const {
     AsmPrinter printer(out, AsmPrinterOptions());
     printer.print(*this);

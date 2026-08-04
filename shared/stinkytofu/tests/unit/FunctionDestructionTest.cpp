@@ -33,9 +33,12 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
 #include <string>
+#include <utility>
 
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/ir/asm/CanonicalSSA.hpp"
 
 using namespace stinkytofu;
 
@@ -60,6 +63,16 @@ class CountedTestIR : public IRBase {
 };
 
 int CountedTestIR::s_alive = 0;
+
+/// Sidecar holding one live-in value whose origin is a full-DWORD VGPR.
+std::unique_ptr<CanonicalSSA> makeSidecar(unsigned regIdx) {
+    CanonicalSSABuilder builder;
+    SSAValue liveIn;
+    liveIn.kind = SSAValueKind::LiveIn;
+    liveIn.origin = {RegType::V, regIdx, RegHalf::NONE};
+    builder.addValue(std::move(liveIn));
+    return std::make_unique<CanonicalSSA>(builder.take());
+}
 }  // namespace
 
 class FunctionDestructionTest : public ::testing::Test {
@@ -131,6 +144,73 @@ TEST_F(FunctionDestructionTest, ClearThenDestructLeavesNoIRs) {
         func.clear();
         EXPECT_EQ(CountedTestIR::s_alive, 0);
         EXPECT_TRUE(func.empty());
+    }
+
+    EXPECT_EQ(CountedTestIR::s_alive, 0);
+}
+
+TEST_F(FunctionDestructionTest, NoCanonicalSSAAttachedByDefault) {
+    Function func("kernel");
+    EXPECT_FALSE(func.hasCanonicalSSA());
+}
+
+TEST_F(FunctionDestructionTest, AttachAndDetachCanonicalSSA) {
+    Function func("kernel");
+
+    func.setCanonicalSSA(makeSidecar(8));
+    ASSERT_TRUE(func.hasCanonicalSSA());
+    EXPECT_EQ(func.getCanonicalSSA().valueCount(), 1u);
+    EXPECT_EQ(func.getCanonicalSSA().value(1).origin.idx, 8u);
+
+    func.clearCanonicalSSA();
+    EXPECT_FALSE(func.hasCanonicalSSA());
+
+    // Detaching twice is safe.
+    func.clearCanonicalSSA();
+    EXPECT_FALSE(func.hasCanonicalSSA());
+}
+
+TEST_F(FunctionDestructionTest, ReplacingCanonicalSSAReleasesThePreviousGraph) {
+    Function func("kernel");
+
+    func.setCanonicalSSA(makeSidecar(8));
+    func.setCanonicalSSA(makeSidecar(20));
+    ASSERT_TRUE(func.hasCanonicalSSA());
+    EXPECT_EQ(func.getCanonicalSSA().value(1).origin.idx, 20u);
+
+    func.setCanonicalSSA(nullptr);
+    EXPECT_FALSE(func.hasCanonicalSSA());
+}
+
+TEST_F(FunctionDestructionTest, ClearDetachesCanonicalSSABeforeDeletingIRs) {
+    EXPECT_EQ(CountedTestIR::s_alive, 0);
+
+    {
+        Function func("kernel");
+        BasicBlock* bb = func.createBasicBlock("entry");
+        bb->appendIR(IRBase::createIR<CountedTestIR>());
+        func.setCanonicalSSA(makeSidecar(8));
+        ASSERT_TRUE(func.hasCanonicalSSA());
+
+        func.clear();
+
+        EXPECT_FALSE(func.hasCanonicalSSA());
+        EXPECT_TRUE(func.empty());
+        EXPECT_EQ(CountedTestIR::s_alive, 0);
+    }
+
+    EXPECT_EQ(CountedTestIR::s_alive, 0);
+}
+
+TEST_F(FunctionDestructionTest, DestructingFunctionReleasesCanonicalSSA) {
+    EXPECT_EQ(CountedTestIR::s_alive, 0);
+
+    {
+        Function func("kernel");
+        BasicBlock* bb = func.createBasicBlock("entry");
+        bb->appendIR(IRBase::createIR<CountedTestIR>());
+        func.setCanonicalSSA(makeSidecar(8));
+        EXPECT_EQ(CountedTestIR::s_alive, 1);
     }
 
     EXPECT_EQ(CountedTestIR::s_alive, 0);

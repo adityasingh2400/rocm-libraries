@@ -24,6 +24,7 @@
 
 #include <cstdint>
 #include <iosfwd>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -33,6 +34,8 @@
 #include "stinkytofu/core/Types.hpp"
 
 namespace stinkytofu {
+class CanonicalSSA;
+
 // Function holds a list of BasicBlocks.
 //
 // This represents a function/kernel in the StinkyTofu IR.
@@ -46,13 +49,20 @@ class STINKYTOFU_EXPORT Function {
     std::unordered_map<std::string, uint64_t> metadata_;
     bool isCallable = false;
 
+    // Canonical SSA sidecar over this function's blocks and instructions. Only
+    // valid while the CFG, instruction order, and register operands that
+    // produced it are unchanged.
+    std::unique_ptr<CanonicalSSA> canonicalSSA;
+
    public:
-    explicit Function(const std::string& name = "") : name(name), basicBlocks(this) {}
+    // Constructor and destructor are out of line: CanonicalSSA is incomplete here,
+    // so its unique_ptr cannot be instantiated in this header.
+    explicit Function(const std::string& name = "");
 
     Function(const Function&) = delete;
     Function& operator=(const Function&) = delete;
 
-    ~Function() = default;
+    ~Function();
 
     const std::string& getName() const {
         return name;
@@ -158,6 +168,24 @@ class STINKYTOFU_EXPORT Function {
         return metadata_.find(key) != metadata_.end();
     }
 
+    // Canonical SSA sidecar (see transforms/asm/LiftAsmRegistersToSSAPass).
+    //
+    // The sidecar is IR state, not a cached analysis: it is attached only after
+    // successful construction and must be cleared by any transformation that
+    // changes the CFG, instruction order, or register operands.
+    bool hasCanonicalSSA() const {
+        return canonicalSSA != nullptr;
+    }
+
+    /// Attached sidecar; callers must check hasCanonicalSSA() first.
+    CanonicalSSA& getCanonicalSSA();
+    const CanonicalSSA& getCanonicalSSA() const;
+
+    /// Replace the attached sidecar. Passing nullptr detaches it.
+    void setCanonicalSSA(std::unique_ptr<CanonicalSSA> ssa);
+
+    void clearCanonicalSSA();
+
     // Iteration over basic blocks
     auto begin() {
         return basicBlocks.begin();
@@ -180,9 +208,8 @@ class STINKYTOFU_EXPORT Function {
     }
 
     /// Delete all BasicBlocks and their IR (list traits delete each block and its IR).
-    void clear() {
-        basicBlocks.clear();
-    }
+    /// Detaches the canonical SSA sidecar first: it references those blocks and IR.
+    void clear();
 
     void dump(std::ostream& out) const;
 
