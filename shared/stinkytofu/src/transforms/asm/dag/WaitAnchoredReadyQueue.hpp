@@ -29,6 +29,7 @@
 
 #include "ReadyQueue.hpp"
 #include "RegionDAG.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/transforms/asm/waitcnt/WaitDataflow.hpp"
 #include "stinkytofu/transforms/asm/waitcnt/WaitPlan.hpp"
 
@@ -170,8 +171,11 @@ class WaitAnchoredPickPolicy {
 
         ++window_.otherPicks;
         if (window_.otherPicks > window_.originalOtherCount) {
-            std::cerr << "[WaitAnchoredReadyQueue pickOne] unable to shorten wait-anchored window: "
-                      << "all original instructions are required by the anchor\n";
+            PASS_DEBUG(std::cerr << "[WaitAnchoredReadyQueue onOtherPicked] anchor dagId="
+                                 << window_.anchor->id
+                                 << " not shortened: otherPicks=" << window_.otherPicks
+                                 << " exceeds originalOtherCount=" << window_.originalOtherCount
+                                 << '\n');
         }
     }
 
@@ -183,15 +187,17 @@ class WaitAnchoredPickPolicy {
             window_.reset();
         }
 
-        std::cerr << "[WaitAnchoredReadyQueue pickOne] erased WMMA dagId=" << node.id << '\n';
+        PASS_DEBUG(std::cerr << "[WaitAnchoredReadyQueue onWmmaPicked] picked WMMA dagId="
+                             << node.id << '\n');
 
         DAGNode* nextWmma = findNextWmmaInOriginalOrder(node.id);
         if (nextWmma == nullptr) return;
 
         auto waitAnchor = waitAnchors_.find(nextWmma->inst);
         const bool isWaitAnchor = waitAnchor != waitAnchors_.end();
-        std::cerr << "[WaitAnchoredReadyQueue pickOne] next original WMMA dagId=" << nextWmma->id
-                  << " waitAnchor=" << (isWaitAnchor ? "true" : "false") << '\n';
+        PASS_DEBUG(std::cerr << "[WaitAnchoredReadyQueue onWmmaPicked] next WMMA dagId="
+                             << nextWmma->id << " waitAnchored=" << (isWaitAnchor ? "yes" : "no")
+                             << '\n');
         if (isWaitAnchor) armWindow(node, *nextWmma, waitAnchor->second);
     }
 
@@ -206,9 +212,9 @@ class WaitAnchoredPickPolicy {
                                       ? window_.originalOtherCount - slotsToMovePastAnchor_
                                       : 0;
         window_.otherPicks = 0;
-        std::cerr << "[WaitAnchoredReadyQueue pickOne] armed wait anchor dagId=" << waitAnchor.id
-                  << " originalOtherCount=" << window_.originalOtherCount
-                  << " otherPickBudget=" << window_.otherPickBudget << '\n';
+        PASS_DEBUG(std::cerr << "[WaitAnchoredReadyQueue armWindow] anchor dagId=" << waitAnchor.id
+                             << " originalOtherCount=" << window_.originalOtherCount
+                             << " otherPickBudget=" << window_.otherPickBudget << '\n');
     }
 
     /// Test whether a node originally lies inside the active interval.

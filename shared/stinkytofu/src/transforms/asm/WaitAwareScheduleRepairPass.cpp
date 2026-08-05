@@ -26,16 +26,20 @@
 #include <cassert>
 #include <unordered_set>
 
-#include "dag/RegionDAG.hpp"
-#include "dag/WaitAnchoredReadyQueue.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/transforms/asm/ExecMaskGrouping.hpp"
 
+// Before dag/*.hpp so PASS_DEBUG inside those headers uses this pass name.
 #define DEBUG_TYPE "WaitAwareScheduleRepairPass"
+
+#include "dag/RegionDAG.hpp"
+#include "dag/WaitAnchoredReadyQueue.hpp"
 
 namespace {
 using namespace stinkytofu;
@@ -216,9 +220,18 @@ class WaitAwareScheduleRepairPass : public StinkyInstPass {
         (void)AM;
         if (kSlotsToMovePastAnchor_ <= 0) return PreservedAnalyses::all();
 
+        const GfxArchID archId =
+            getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
+                         passCtx.getGemmTileConfig().arch[2]);
+        const uint32_t wavefrontSize = passCtx.getWavefrontSize();
+
         for (BasicBlock& bb : func) {
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
+
+            AsmIRBuilder builder(bb, archId);
+            collapseExecMaskedRegions(bb, builder, wavefrontSize);
             repairBlock(bb, passCtx, static_cast<unsigned>(kSlotsToMovePastAnchor_));
+            expandExecMaskedGroups(bb);
         }
         return PreservedAnalyses::none();
     }
