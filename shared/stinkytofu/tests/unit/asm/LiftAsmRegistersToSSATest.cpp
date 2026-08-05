@@ -314,14 +314,66 @@ TEST_F(LiftAsmRegistersToSSATest, RejectsTemplateVirtualRegisters) {
     EXPECT_TRUE(contains(error, "unresolved template virtual register")) << error;
 }
 
-TEST_F(LiftAsmRegistersToSSATest, RejectsSgprOperands) {
+TEST_F(LiftAsmRegistersToSSATest, LiftsSgprOperands) {
     AsmIRBuilder builder(*entry, kArch);
     StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kArch));
     mov->addDestReg(StinkyRegister("v", 0, 1));
     mov->addSrcReg(StinkyRegister("s", 4, 1));
 
+    const CanonicalSSA ssa = lift();
+    ASSERT_EQ(ssa.valueCount(), 2u);
+    EXPECT_EQ(ssa.value(1).kind, SSAValueKind::LiveIn);
+    EXPECT_EQ(ssa.value(1).origin.type, RegType::S);
+    EXPECT_EQ(ssa.value(1).origin.idx, 4u);
+    EXPECT_EQ(ssa.value(2).origin.type, RegType::V);
+    EXPECT_TRUE(verifyCanonicalSSA(*func, ssa).ok());
+}
+
+TEST_F(LiftAsmRegistersToSSATest, ScalarAndVectorRegistersWithTheSameIndexAreDistinct) {
+    AsmIRBuilder builder(*entry, kArch);
+    StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kArch));
+    mov->addDestReg(StinkyRegister("v", 4, 1));
+    mov->addSrcReg(StinkyRegister("s", 4, 1));
+
+    const CanonicalSSA ssa = lift();
+    // s4 is a live-in and v4 is defined here; the shared index must not merge
+    // them, because the register key carries the class.
+    ASSERT_EQ(ssa.valueCount(), 2u);
+    EXPECT_EQ(ssa.value(1).origin.type, RegType::S);
+    EXPECT_EQ(ssa.value(2).origin.type, RegType::V);
+    EXPECT_EQ(ssa.value(1).origin.idx, ssa.value(2).origin.idx);
+    EXPECT_TRUE(verifyCanonicalSSA(*func, ssa).ok());
+}
+
+TEST_F(LiftAsmRegistersToSSATest, LiftsWideScalarRangesPerDword) {
+    // tensor_load_to_lds reads a 4-SGPR base and an 8-SGPR descriptor.
+    StinkyInstruction* load = createTensorLoadInBlock(entry, kArch, /*src0=*/8, /*src1=*/16);
+
+    const CanonicalSSA ssa = lift();
+    const SSAInstructionInfo* info = ssa.findInstructionInfo(*load);
+    ASSERT_NE(info, nullptr);
+    ASSERT_EQ(info->sources.size(), 2u);
+    EXPECT_EQ(info->sources[0].units.size(), 4u);
+    EXPECT_EQ(info->sources[1].units.size(), 8u);
+
+    for (size_t unit = 0; unit < 4; ++unit) {
+        const SSAValue& value = ssa.value(info->sources[0].units[unit]);
+        EXPECT_EQ(value.origin.type, RegType::S);
+        EXPECT_EQ(value.origin.idx, 8u + unit);
+    }
+    EXPECT_TRUE(verifyCanonicalSSA(*func, ssa).ok());
+}
+
+TEST_F(LiftAsmRegistersToSSATest, RejectsAccumulatorOperands) {
+    AsmIRBuilder builder(*entry, kArch);
+    StinkyInstruction* wmma = builder.create(getMCIDByUOp(GFX::v_wmma_f32_16x16x32_bf16, kArch));
+    wmma->addDestReg(StinkyRegister("a", 10, 8));
+    wmma->addSrcReg(StinkyRegister("v", 20, 8));
+    wmma->addSrcReg(StinkyRegister("v", 30, 8));
+    wmma->addSrcReg(StinkyRegister("a", 10, 8));
+
     const std::string error = liftError();
-    EXPECT_TRUE(contains(error, "register class 's' is not lifted yet")) << error;
+    EXPECT_TRUE(contains(error, "register class 'a' is not lifted yet")) << error;
 }
 
 TEST_F(LiftAsmRegistersToSSATest, RejectsAnalysisPhis) {
@@ -360,11 +412,12 @@ TEST_F(LiftAsmRegistersToSSATest, DiagnosticsNameTheFunctionAndInstruction) {
     AsmIRBuilder builder(*entry, kArch);
     StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kArch));
     mov->addDestReg(StinkyRegister("v", 3, 1));
-    mov->addSrcReg(StinkyRegister("s", 4, 1));
+    mov->addSrcReg(StinkyRegister("a", 4, 1));
 
     const std::string error = liftError();
     EXPECT_EQ(error,
-              "@kernel #1 src0: register class 's' is not lifted yet; only VGPRs are supported");
+              "@kernel #1 src0: register class 'a' is not lifted yet; "
+              "VGPRs and SGPRs are supported");
 }
 
 TEST_F(LiftAsmRegistersToSSATest, KernelPreflightSpotsCallSitesInAnyFunction) {

@@ -57,10 +57,10 @@ struct LiftAsmRegistersToSSAOptions {
 /// sidecar, placed at iterated dominance frontiers and pruned by liveness so
 /// no dead PHI is created. Reducible and irreducible CFGs are both supported.
 ///
-/// Current scope is deliberately narrow. Operands must be full-DWORD VGPRs,
-/// and every block must be reachable from the entry. Literals, special
+/// Current scope is deliberately narrow. Operands must be full-DWORD VGPRs or
+/// SGPRs, and every block must be reachable from the entry. Literals, special
 /// registers such as EXEC or SCC, and pseudo registers are ignored rather than
-/// lifted. Anything else - other register classes, unresolved template virtual
+/// lifted. Anything else - accumulator classes, unresolved template virtual
 /// registers, True16 halves, calls, or leftover analysis PHIs - is reported as
 /// an error instead of being silently mishandled.
 ///

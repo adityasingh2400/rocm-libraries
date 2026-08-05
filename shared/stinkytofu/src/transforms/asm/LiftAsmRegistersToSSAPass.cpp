@@ -53,8 +53,8 @@ constexpr const char* kPassName = "LiftAsmRegistersToSSA";
 enum class OperandKind {
     /// Not allocatable: literal, special register, or pseudo register.
     Ignored,
-    /// Allocatable full-DWORD VGPR range.
-    VgprRange,
+    /// Allocatable full-DWORD range.
+    AllocatableRange,
     /// Recognised but out of scope; `reason` explains why.
     Unsupported,
 };
@@ -65,6 +65,17 @@ struct OperandClass {
     std::string reason;
 };
 
+/// Classes whose registers become SSA values.
+///
+/// VCC and EXEC are their own register types here rather than SGPR indices, so
+/// widening to SGPRs cannot make a scalar operand alias a special register.
+/// Accumulators stay out until their VGPR aliasing rules are modelled: on some
+/// architectures an AGPR and a VGPR name the same storage, and two SSA values
+/// over one physical register would be unsound.
+bool isLiftableClass(RegType type) {
+    return type == RegType::V || type == RegType::S;
+}
+
 OperandClass classifyOperand(const StinkyRegister& reg) {
     if (!reg.isRegister()) return {OperandKind::Ignored, 0, {}};
     if (reg.isVirtualReg())
@@ -72,11 +83,11 @@ OperandClass classifyOperand(const StinkyRegister& reg) {
                 "unresolved template virtual register; resolve it before lifting"};
     if (isPseudoReg(reg)) return {OperandKind::Ignored, 0, {}};
     if (!isAllocatableReg(reg.reg.type)) return {OperandKind::Ignored, 0, {}};
-    if (reg.reg.type != RegType::V)
+    if (!isLiftableClass(reg.reg.type))
         return {OperandKind::Unsupported, 0,
                 "register class '" + regTypeToString(reg.reg.type) +
-                    "' is not lifted yet; only VGPRs are supported"};
-    return {OperandKind::VgprRange, reg.reg.num, {}};
+                    "' is not lifted yet; VGPRs and SGPRs are supported"};
+    return {OperandKind::AllocatableRange, reg.reg.num, {}};
 }
 
 /// True when any operand selects a True16 half, which needs sub-DWORD units.
