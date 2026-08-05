@@ -367,6 +367,27 @@ TEST_F(LiftAsmRegistersToSSATest, DiagnosticsNameTheFunctionAndInstruction) {
               "@kernel #1 src0: register class 's' is not lifted yet; only VGPRs are supported");
 }
 
+TEST_F(LiftAsmRegistersToSSATest, KernelPreflightSpotsCallSitesInAnyFunction) {
+    createVAddInBlock(entry, kArch, 2, 0, 1);
+
+    Function callee("callee");
+    setFunctionArch(callee, kArch);
+    BasicBlock* calleeEntry = callee.createBasicBlock("entry");
+    createVAddInBlock(calleeEntry, kArch, 3, 0, 1);
+
+    const std::vector<const Function*> kernel{func.get(), &callee};
+    EXPECT_FALSE(kernelHasCallSites(kernel));
+
+    // A call anywhere in the kernel disqualifies the whole thing, not just the
+    // function that contains it.
+    AsmIRBuilder builder(*calleeEntry, kArch);
+    StinkyInstruction* call = builder.create(getMCIDByUOp(GFX::s_swappc_b64, kArch));
+    ASSERT_TRUE(isCall(*call));
+
+    EXPECT_TRUE(kernelHasCallSites(kernel));
+    EXPECT_TRUE(kernelHasCallSites({&callee}));
+}
+
 TEST_F(LiftAsmRegistersToSSATest, RepeatedLiftsProduceIdenticalGraphs) {
     createDsReadB128InBlock(entry, kArch, 4, 0);
     createDSWriteInBlock(entry, kArch, 0, 4);

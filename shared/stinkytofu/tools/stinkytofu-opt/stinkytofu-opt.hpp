@@ -35,6 +35,7 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/DestroyCanonicalSSAPass.hpp"
 #include "stinkytofu/transforms/asm/DumpCanonicalSSAPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
@@ -141,6 +142,9 @@ const std::vector<PassInfo> availablePasses = {
          config.requireCanonicalSSA = !hasPassArg(args, "allowMissing");
          return createDumpCanonicalSSAPass(config);
      }},
+    // ReplayLegacyColoringPass lowers the sidecar back to the registers it was
+    // lifted from. Lift followed by replay must not change the program.
+    {"ReplayLegacyColoringPass", [](const auto&) { return createReplayLegacyColoringPass(); }},
     {"DumpStinkyModulePass",
      [](const auto&) { return createDumpStinkyModulePass({.stirPath = "dump_module.stir"}); }},
     {"PeepholeOptimizationPass", [](const auto&) { return createPeepholeOptimizationPass(); }},

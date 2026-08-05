@@ -23,6 +23,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/ir/asm/CanonicalSSA.hpp"
@@ -78,6 +79,16 @@ STINKYTOFU_EXPORT Expected<CanonicalSSA> liftAsmRegistersToSSA(
 STINKYTOFU_EXPORT Expected<CanonicalSSA> liftAsmRegistersToSSA(
     Function& function, const DominanceInfo& dominance,
     const LiftAsmRegistersToSSAOptions& options = {});
+
+/// True when any function in \p functions contains a call site.
+///
+/// A kernel must be recoloured as a whole or not at all. Caller and callee agree
+/// on registers only through the convention the producer used, and nothing
+/// records that agreement yet, so recolouring one side would silently break it.
+/// A pipeline enabling allocation therefore preflights the whole kernel with
+/// this and keeps the legacy path for all of it when the answer is true, rather
+/// than deciding function by function.
+STINKYTOFU_EXPORT bool kernelHasCallSites(const std::vector<const Function*>& functions);
 
 /// Creates a pass that lifts a function's physical registers to canonical SSA
 /// and attaches the result to the function.

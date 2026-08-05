@@ -659,6 +659,20 @@ char LiftAsmRegistersToSSAPassImpl::ID = 0;
 
 }  // namespace
 
+bool kernelHasCallSites(const std::vector<const Function*>& functions) {
+    for (const Function* function : functions) {
+        if (function == nullptr) continue;
+        for (const BasicBlock& bb : *function) {
+            for (const IRBase& ir : bb) {
+                const auto* instruction = dyn_cast<StinkyInstruction>(&ir);
+                if (instruction == nullptr || instruction->getHwInstDesc() == nullptr) continue;
+                if (isCall(*instruction)) return true;
+            }
+        }
+    }
+    return false;
+}
+
 Expected<CanonicalSSA> liftAsmRegistersToSSA(Function& function, const DominanceInfo& dominance,
                                              const LiftAsmRegistersToSSAOptions& options) {
     return Lifter(function, dominance, options).run();
