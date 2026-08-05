@@ -17,12 +17,19 @@ checkout — see [Reproducing the numbers](#8-reproducing-the-numbers).
 
 ## 1. Conclusion first
 
-1. **The hero case is real and the arithmetic checks out.** Coupled PGR=2 needs
+1. **The hero case is real, and it is marginal.** Coupled PGR=2 needs
    **329 728 B (322.00 KiB)** and is rejected with
    `Kernel Uses 329728 > 327680 bytes of LDS`. Making A single-buffered and B
    double-buffered needs **296 448 B (289.50 KiB)** and fits. With `TDMInst=3`
    (the real gfx1250 path) the numbers are 332 800 B → **299 520 B (292.50 KiB)**.
-   Both match Henry's estimate.
+   Henry's estimate reaches the same conclusion but is conservative on the
+   exact bytes (348 160 → 313 344), because it assumes a uniform `272/256`
+   padding factor whereas the real derivation picks
+   `LdsBlockSizePerPadA=1024, LdsPadA=16` and `LdsBlockSizePerPadB=4096,
+   LdsPadB=32`. The practical consequence is worth flagging: **the coupled
+   variant overflows by only 2 048 B**, so any change to auto-padding selection
+   can flip this case either way. Tests must pin the derived footprints, not
+   just the pass/fail verdict.
 
 2. **The feature is a per-tensor generalisation of a configuration that already
    works.** Today `1LDSBuffer=1` gives *both* tensors one LDS block and
@@ -342,17 +349,17 @@ double-buffered tensors replicated":
 
 ```
 [ A ][ B blk0 ][ B blk1 ]
-0    33280     33280+133120
+0    33280     164864          (non-TDM hero numbers; stride = alignedB = 131584)
 ```
 
 Stride for B is `alignedB`, which is **not** a power of two. Checked against the
-hero case:
+non-TDM hero case (`a = 33 280`, `b = 131 584`, `MaxLDS = 327 680`):
 
-| layout | swap form | total | fits 320 KiB |
-| --- | --- | --- | --- |
-| `[A][B0][B1]`, stride = `alignedB` | SGPR/VGPR base swap (`StoreSwapAddr`) | 296 448 B | **yes** |
-| `[B0][B1][A]`, stride = pow2(`alignedB`) | inline XOR constant | 436 224 B | no |
-| `[A][B0][B1]`, B base aligned to pow2 stride | inline XOR constant | 663 552 B | no |
+| layout | swap form | stride | total | fits 320 KiB |
+| --- | --- | --- | --- | --- |
+| `[A][B0][B1]` | SGPR/VGPR base swap (`StoreSwapAddr`) | 131 584 | 296 448 B (289.50 KiB) | **yes** |
+| `[B0][B1][A]` | inline XOR constant | 262 144 | 427 008 B (417.00 KiB) | no |
+| `[A][B0][B1]`, B base aligned to the stride | inline XOR constant | 262 144 | 655 872 B (640.50 KiB) | no |
 
 So: **a mixed configuration must force `StoreSwapAddr = True`.** The inline-XOR
 fast path is only correct for a power-of-two stride (for `off < X`,
@@ -464,16 +471,24 @@ phase where a human should actually read the generated assembly.
 ## 6. Test plan
 
 Three tiers, cheapest first. Tier 1 and 2 need **no GPU** — they run on any host
-with the ROCm toolchain, which is what makes the inner dev loop fast.
+with the ROCm toolchain and rocisa installed, which is what makes the inner dev
+loop fast.
 
-### 6.1 Tier 1 — pure-logic pytest (no GPU, no rocisa)
+### 6.1 Tier 1 — pure-logic pytest (no GPU)
 
 Model on `Tensile/Tests/unit/test_segment_interleave.py`, which tests the
-`segment_interleave` oracle with a `_FakeDataType` and no rocisa import. Same
-shape here: put the per-tensor budget maths in a small pure module
+`segment_interleave` oracle with a `_FakeDataType` and imports nothing from
+rocisa. Same shape here: put the per-tensor budget maths in a small pure module
 (`Tensile/SolutionStructs/pgr_buffering.py`) so it can be unit-tested in
 milliseconds, then have `Solution.py` call it — exactly the
 `segment_interleave.py` / `Solution.py` relationship that already exists.
+
+Gotcha worth knowing before you set up the loop: keeping the *module* rocisa-free
+is what makes these tests fast and robust, but it does **not** let you run them
+without rocisa installed. `Tensile/Tests/unit/conftest.py` imports
+`streamk5_test_helpers` → `KernelWriterAssembly` → `rocisa`, so collection fails
+for the whole directory if rocisa is missing. Install it once
+(`invoke rocisa`); after that the suite itself runs in ~0.1 s.
 
 New file `Tensile/Tests/unit/test_pgr_decouple_budget.py`:
 
@@ -635,10 +650,10 @@ invoke rocisa
 # Tier 1 — milliseconds, run on every edit
 pytest Tensile/Tests/unit/test_pgr_decouple_budget.py -q
 
-# Tier 0 gate — the regression net; must stay green through Phase 0/1
+# Tier 2, regression net — the Phase 0/1 gate; zero snapshot diffs allowed
 pytest Tensile/Tests/unit/characterization/_codegen -q --snapshot-warn-unused
 
-# Tier 2 — new designed configs
+# Tier 2, new designed configs for the decoupled kernels
 pytest Tensile/Tests/unit/characterization/_codegen/test_r7_pgr_decouple_char.py -q
 
 # Tier 3 — needs a GPU; scope to the new config
