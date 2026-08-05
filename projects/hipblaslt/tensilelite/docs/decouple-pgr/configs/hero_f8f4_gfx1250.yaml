@@ -1,0 +1,95 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Decoupled-PGR hero case probe: F8F4 TN MT64x512x512 on gfx1250.
+#
+# Runs against the CURRENT tree (no new parameters) and is meant for
+# docs/decouple-pgr/lds_budget_probe.py, not for pytest collection:
+#
+#     python3 docs/decouple-pgr/lds_budget_probe.py \
+#         docs/decouple-pgr/configs/hero_f8f4_gfx1250.yaml gfx1250
+#
+# 1LDSBuffer is forked over [0, 1] on purpose so one run shows both halves of
+# the problem:
+#
+#   1LDSBuffer=0  (coupled PGR=2, A:2 blk + B:2 blk)
+#       -> reject: Kernel Uses 329728 > 327680 bytes of LDS
+#   1LDSBuffer=1  (A:1 blk + B:1 blk)
+#       -> valid, LdsNumBytes = 164864 (161.00 KiB); this is the variant that
+#          today's shipping f8f4ss_gfx1250.yaml is forced to use.
+#
+# The per-tensor footprints printed for the 1LDSBuffer=1 solution
+# (LdsNumElementsAlignedA = 33280, LdsNumElementsAlignedB = 131584) are what the
+# decoupled A:1/B:2 target of 296448 B (289.50 KiB) is computed from.
+#
+# MatrixInstruction [16,16,128,1, 1, 2,16, 2,2] gives MacroTile0=64,
+# MacroTile1=512, NumWaves=4.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  PrintSolutionRejectionReason: True
+  Device: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F4
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 16, 2, 2]
+        - DepthU: [512]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [True]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0, 1]
+        - TDMInst: [0]
+        - SourceSwap: [True]
+        - DirectToVgprSparseMetadata: [False]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 512]

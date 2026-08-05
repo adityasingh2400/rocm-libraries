@@ -1,0 +1,135 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# DRAFT tensilelite test YAML for decoupled PrefetchGlobalRead (Tier 3, needs a GPU).
+#
+# STAGED, NOT ACTIVE. This config uses parameters that do not exist yet, so it
+# must stay outside Tensile/Tests/ until Phase 1 lands. Moving it early breaks
+# Tensile/Tests/unit/test_input_yaml_corpus_clean.py, which type-checks every
+# YAML under Tensile/Tests/common/ against validParameters.
+#
+# Destination once the parameter exists:
+#   Tensile/Tests/common/gemm/gfx12/pgr_decouple_gfx1250.yaml
+#
+# The two candidate spellings from PLAN.md section 4.1 are both shown below;
+# keep exactly one fork pair and delete the other.
+#
+#   Option A:  PrefetchGlobalReadA / PrefetchGlobalReadB   (-1 = inherit)
+#   Option B:  1LDSBufferA / 1LDSBufferB                   (-1 = auto)
+#
+# Coverage: the (A,B) pairs cover the mixed case in both directions, the coupled
+# control, and the legacy inherit path. On gfx1250 the hero shape only fits in
+# the two mixed rows and is rejected for the coupled row, so
+# PrintSolutionRejectionReason must stay True or the coupled row silently
+# produces zero solutions and the test looks green for the wrong reason.
+#
+#   (1, 2)   A single-buffered, B ping-pong   -> 296448 B / 289.50 KiB   fits
+#   (2, 1)   A ping-pong, B single-buffered   -> 198144 B / 193.50 KiB   fits
+#   (2, 2)   coupled control                  -> 329728 B / 322.00 KiB   REJECTED
+#   (-1, -1) legacy inherit                   -> same as (2, 2)
+#
+# ScheduleIterAlg is forked over [0, 3] because the read-sync-write barrier for a
+# single-buffered tensor is emitted from two different places: the SIA0/SIA1
+# iteration assembler (KernelWriter.py:1025) and the SIA3 scheduler.
+#
+# Problem sizes: 512x512x512 is K-tail-free at DepthU=512; 512x512x640 leaves a
+# tail so localWriteResetOffsets / localReadResetOffsets are exercised too.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1     # validate every element; this is the correctness signal
+  KernelTime: True
+  BoundsCheck: 0
+  PrintSolutionRejectionReason: True
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: False
+  Architecture: gfx1250
+  PrintLevel: 2
+
+BenchmarkProblems:
+  #######################################
+  # F8F4 TN - the hero shape
+  #######################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F4
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 16, 2, 2]   # MT 64x512, NumWaves=4
+        - DepthU: [512]
+
+        # ---- Option A: per-tensor PGR level -------------------------------
+        - PrefetchGlobalReadA: [1, 2, -1]
+        - PrefetchGlobalReadB: [2, 1, -1]
+        # ---- Option B: per-tensor single-buffer flag ----------------------
+        # - 1LDSBufferA: [1, 0, -1]
+        # - 1LDSBufferB: [0, 1, -1]
+        # ------------------------------------------------------------------
+
+        - PrefetchGlobalRead: [2]
+        - TDMInst: [0, 3]
+        - ScheduleIterAlg: [0, 3]
+        - PrefetchLocalRead: [1]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [True]
+        - StaggerU: [0]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - DirectToVgprSparseMetadata: [False]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]   # rejected together with mixed buffering
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 512]   # K-tail free
+          - Exact: [512, 512, 1, 640]   # leaves a K tail
+        - ActivationArgs:
+          - [Enum: none]
